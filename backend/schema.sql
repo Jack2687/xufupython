@@ -171,8 +171,11 @@ CREATE TABLE IF NOT EXISTS subscription_runs (
 ALTER TABLE subscription_runs ADD COLUMN IF NOT EXISTS trace_round int NOT NULL DEFAULT 0;
 -- Written at admission; changing the site default never reassigns existing jobs.
 -- Legacy rows with unknown ownership must not be guessed from the current setting.
-ALTER TABLE subscription_runs ADD COLUMN IF NOT EXISTS subscription_flow text NOT NULL DEFAULT ''
- CHECK (subscription_flow IN ('', 'gener_direct_pay', 'cslive_go_direct_pay'));
+ALTER TABLE subscription_runs ADD COLUMN IF NOT EXISTS subscription_flow text NOT NULL DEFAULT '';
+-- Existing columns keep their original inline CHECK; refresh it explicitly so new flows are allowed.
+ALTER TABLE subscription_runs DROP CONSTRAINT IF EXISTS subscription_runs_subscription_flow_check;
+ALTER TABLE subscription_runs ADD CONSTRAINT subscription_runs_subscription_flow_check
+ CHECK (subscription_flow IN ('', 'gener_direct_pay', 'cslive_direct_pay', 'cslive_go_direct_pay', 'cslive_full_go'));
 ALTER TABLE subscription_runs ADD COLUMN IF NOT EXISTS checkout_checkpoint_enc text NOT NULL DEFAULT '';
 ALTER TABLE subscription_runs ADD COLUMN IF NOT EXISTS network_retry_count int NOT NULL DEFAULT 0 CHECK(network_retry_count>=0);
 ALTER TABLE subscription_runs ADD COLUMN IF NOT EXISTS network_retry_at timestamptz NOT NULL DEFAULT now();

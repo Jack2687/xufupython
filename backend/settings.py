@@ -35,7 +35,7 @@ def validate_config(key, v):
         for name in ('subscription_flow','checkout_flow'):
             if name in v: require(isinstance(v[name],str) and length(v[name])<=80,'流程配置无效')
         if 'subscription_flow' in v:
-            require(v['subscription_flow'] in ('','gener_direct_pay','cslive_go_direct_pay'),
+            require(v['subscription_flow'] in ('','gener_direct_pay','cslive_go_direct_pay','cslive_full_go'),
                     '此订阅流程不受支持，请重新选择流程')
         if 'checkout_type' in v: require(v['checkout_type'] in ('hosted','oaics'),'结账链接类型无效')
         if 'checkout_types' in v:

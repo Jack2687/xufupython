@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI,Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
-from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,admin_content,renewals,subscription,subscription_cslive_go
+from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
@@ -37,11 +37,11 @@ def maintenance():
 
 
 def worker_loop(stop):
-    executor=ThreadPoolExecutor(max_workers=26,thread_name_prefix='xufu-worker')
-    proxy_jobs=set();renewal_jobs=set();subscription_jobs=set();cslive_go_jobs=set();last_maintenance=0
+    executor=ThreadPoolExecutor(max_workers=30,thread_name_prefix='xufu-worker')
+    proxy_jobs=set();renewal_jobs=set();subscription_jobs=set();cslive_go_jobs=set();cslive_full_jobs=set();last_maintenance=0
     try:
         while not stop.wait(1):
-            for group in (proxy_jobs,renewal_jobs,subscription_jobs,cslive_go_jobs):
+            for group in (proxy_jobs,renewal_jobs,subscription_jobs,cslive_go_jobs,cslive_full_jobs):
                 for future in list(group):
                     if future.done():
                         try:future.result()
@@ -60,6 +60,9 @@ def worker_loop(stop):
                     if len(cslive_go_jobs)<4:
                         job=subscription_cslive_go.claim_subscription()
                         if job:cslive_go_jobs.add(executor.submit(subscription_cslive_go.run_subscription,job))
+                    if len(cslive_full_jobs)<4:
+                        job=subscription_cslive_full.claim_subscription()
+                        if job:cslive_full_jobs.add(executor.submit(subscription_cslive_full.run_subscription,job))
             except Exception as e:log.error('Worker scheduling failed (%s)',type(e).__name__)
     finally:executor.shutdown(wait=True,cancel_futures=True)
 
@@ -112,7 +115,7 @@ async def security(request:Request,call_next):
     return result
 
 
-for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go):app.include_router(module.router)
+for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)
 for router in (records.public_router,records.router,records.admin_router):app.include_router(router)
 
 

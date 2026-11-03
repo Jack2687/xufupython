@@ -70,7 +70,7 @@ async function createDraft(prepare=false){
  if(full&&!cardReady.value)return
  await submit(async()=>{
   let v
-  try{const flowPrefix=props.pub?.subscription_flow==='cslive_go_direct_pay'?'/cslive-go':'';v=await api(flowPrefix+'/orders','POST',{product_id:selected.value.id,session:JSON.parse(sessionText.value),country:country.value,seats:selected.value.id.startsWith('team')?seats.value:1,accepted:accepted.value,...(prepare?{prepare:true,workspace_name:workspace.value,premium_seats:premiumSeats.value}:{}),...(full?{workflow:'subscription',keep_renewal:renew.value,card:parsedCard.value.card}:{})},{'Idempotency-Key':draftKey.value})}finally{if(full)clearCard()}
+  try{const flowPrefix=props.pub?.subscription_flow==='cslive_full_go'?'/cslive-full':props.pub?.subscription_flow==='cslive_go_direct_pay'?'/cslive-go':'';v=await api(flowPrefix+'/orders','POST',{product_id:selected.value.id,session:JSON.parse(sessionText.value),country:country.value,seats:selected.value.id.startsWith('team')?seats.value:1,accepted:accepted.value,...(prepare?{prepare:true,workspace_name:workspace.value,premium_seats:premiumSeats.value}:{}),...(full?{workflow:'subscription',keep_renewal:renew.value,card:parsedCard.value.card}:{})},{'Idempotency-Key':draftKey.value})}finally{if(full)clearCard()}
   draftKey.value=key();sessionText.value='';detail.value=await api('/orders/'+v.id);modal.value='order';emit('refresh');notify(full?'已受理，将自动办理付款及续费设置':prepare?'已提交结账准备；未付款或扣费':'已保存方案；未提交付款或扣费')
  })
 }
