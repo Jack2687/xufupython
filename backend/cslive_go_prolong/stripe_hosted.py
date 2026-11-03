@@ -16,7 +16,11 @@ STRIPE_API = "https://api.stripe.com"
 PK_FALLBACK = (
     "pk_live_51HOrSwC6h1nxGoI3lTAgRjYVrz4dU3fVOabyCcKR3pbEJguCVAlqCxdxCUvoRh1XWwRacViovU3kLKvpkjh7IqkW00iXQsjo3n"
 )
-STRIPE_VERSION = "2020-08-27;custom_checkout_beta=v1"
+# cs_live uses this newer hosted API version when it initializes the checkout, so the
+# Python confirm must match it; the gener-era 2020-08-27 version makes Stripe ignore
+# the confirm and return the page state instead of charging.
+STRIPE_VERSION = "2026-03-25.dahlia"
+LEGACY_STRIPE_VERSION = "2020-08-27;custom_checkout_beta=v1"
 DEFAULT_RUNTIME_VERSION = "af5d23bda9"
 
 RUNTIME_REQUIRED_KEYS = ("version", "js_checksum", "rv_timestamp")
@@ -30,6 +34,10 @@ def validate_confirm_runtime(runtime: dict[str, Any]) -> None:
     missing = [k for k in RUNTIME_REQUIRED_KEYS if not str((runtime or {}).get(k) or "").strip()]
     if missing:
         raise ValueError("runtime 缺少 confirm 必填键: " + ", ".join(missing))
+
+
+def _strip_fragment(url: str) -> str:
+    return (url or "").split("#", 1)[0]
 
 
 def build_payment_method_form(
@@ -49,10 +57,13 @@ def build_payment_method_form(
     checkout_config_id: str,
     runtime_version: str,
     address: dict[str, str] | None = None,
+    hosted_url: str = "",
+    elements_session_id: str = "",
+    time_on_page: str = "12000",
 ) -> dict[str, str]:
     addr = address or HAR_ADDRESS
     ver = runtime_version or DEFAULT_RUNTIME_VERSION
-    return {
+    form = {
         "type": "card",
         "card[number]": card_number,
         "card[exp_month]": exp_month,
@@ -65,19 +76,27 @@ def build_payment_method_form(
         "billing_details[address][city]": addr["city"],
         "billing_details[address][line1]": addr["line1"],
         "billing_details[address][postal_code]": addr["postal_code"],
+        "payment_user_agent": f"stripe.js/{ver}; stripe-js-v3/{ver}; checkout",
+        "time_on_page": time_on_page,
         "guid": guid,
         "muid": muid,
         "sid": sid,
         "key": pk,
         "_stripe_version": STRIPE_VERSION,
-        "payment_user_agent": f"stripe.js/{ver}; stripe-js-v3/{ver}; checkout",
         "client_attribution_metadata[client_session_id]": client_session_id,
         "client_attribution_metadata[checkout_session_id]": cs,
-        "client_attribution_metadata[checkout_config_id]": checkout_config_id,
         "client_attribution_metadata[merchant_integration_source]": "checkout",
         "client_attribution_metadata[merchant_integration_version]": "hosted_checkout",
         "client_attribution_metadata[payment_method_selection_flow]": "automatic",
     }
+    ref = _strip_fragment(hosted_url)
+    if ref:
+        form["referrer"] = ref
+    if elements_session_id:
+        form["client_attribution_metadata[elements_session_id]"] = elements_session_id
+    if checkout_config_id:
+        form["client_attribution_metadata[checkout_config_id]"] = checkout_config_id
+    return form
 
 
 def build_confirm_form(
@@ -93,32 +112,44 @@ def build_confirm_form(
     client_session_id: str,
     checkout_config_id: str,
     runtime: dict[str, Any],
+    eid: str = "NA",
+    hosted_url: str = "",
+    elements_session_id: str = "",
+    time_on_page: str = "12000",
 ) -> dict[str, str]:
     runtime = merge_runtime(runtime)
     validate_confirm_runtime(runtime)
-    ver = str(runtime["version"]).strip()
+    # cs_live hosted confirm (cs_live.go:7010): no init_checksum, no JS "version" field;
+    # carries referrer / return_url / consent and the dahlia _stripe_version.
     form = {
-        "eid": "NA",
+        "eid": eid or "NA",
         "payment_method": pm_id,
         "expected_amount": str(int(expected_amount)),
         "expected_payment_method_type": "card",
+        "link_brand": "link",
+        "key": pk,
         "_stripe_version": STRIPE_VERSION,
+        "js_checksum": str(runtime["js_checksum"]).strip(),
+        "rv_timestamp": str(runtime["rv_timestamp"]).strip(),
+        "time_on_page": time_on_page,
         "guid": guid,
         "muid": muid,
         "sid": sid,
-        "key": pk,
-        "version": ver,
-        "init_checksum": init_checksum,
-        "js_checksum": str(runtime["js_checksum"]).strip(),
-        "rv_timestamp": str(runtime["rv_timestamp"]).strip(),
-        "link_brand": "link",
         "client_attribution_metadata[client_session_id]": client_session_id,
         "client_attribution_metadata[checkout_session_id]": cs,
-        "client_attribution_metadata[checkout_config_id]": checkout_config_id,
         "client_attribution_metadata[merchant_integration_source]": "checkout",
         "client_attribution_metadata[merchant_integration_version]": "hosted_checkout",
         "client_attribution_metadata[payment_method_selection_flow]": "automatic",
+        "consent[terms_of_service]": "accepted",
     }
+    ref = _strip_fragment(hosted_url)
+    if ref:
+        form["referrer"] = ref
+        form["return_url"] = ref
+    if elements_session_id:
+        form["client_attribution_metadata[elements_session_id]"] = elements_session_id
+    if checkout_config_id:
+        form["client_attribution_metadata[checkout_config_id]"] = checkout_config_id
     captcha = str(runtime.get("passive_captcha_token") or "").strip()
     if captcha:
         form["passive_captcha_token"] = captcha
@@ -167,14 +198,18 @@ class StripeHostedClient:
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(f"{tag} 返回非 JSON") from exc
 
-    def init(self, cs: str) -> dict[str, Any]:
+    def init(self, cs: str, hosted_url: str = "", timezone: str = "Asia/Manila") -> dict[str, Any]:
         data = {
             "key": self.pk,
             "eid": "NA",
-            "browser_locale": "zh-CN",
-            "browser_timezone": "Asia/Shanghai",
+            "browser_locale": "en-US",
+            "browser_timezone": timezone,
             "redirect_type": "url",
+            "_stripe_version": STRIPE_VERSION,
         }
+        ref = _strip_fragment(hosted_url)
+        if ref:
+            data["referrer"] = hosted_url
         payload = self._post(f"/v1/payment_pages/{cs}/init", data, "init")
         if not payload.get("init_checksum"):
             raise RuntimeError("init 未返回 init_checksum")
@@ -217,6 +252,18 @@ def resolve_checkout_config_id(init_resp: dict[str, Any]) -> str:
         if val:
             return val
     return str(uuid.uuid4())
+
+
+def resolve_eid(resp: dict[str, Any]) -> str:
+    return str((resp or {}).get("eid") or "").strip() or "NA"
+
+
+def resolve_elements_session(resp: dict[str, Any]) -> str:
+    for key in ("elements_session_id", "session_id", "elements_session"):
+        val = str((resp or {}).get(key) or "").strip()
+        if val:
+            return val
+    return ""
 
 
 def resolve_expected_amount(tax_resp: dict[str, Any], init_resp: dict[str, Any] | None = None) -> int:

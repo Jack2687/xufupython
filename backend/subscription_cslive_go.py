@@ -26,7 +26,7 @@ from .cslive_go_prolong.stripe_checksum import build_runtime_checksums, fetch_st
 from .cslive_go_prolong.stripe_hosted import (
     StripeHostedClient, PK_FALLBACK,
     build_payment_method_form, build_confirm_form,
-    resolve_checkout_config_id, resolve_expected_amount,
+    resolve_checkout_config_id, resolve_expected_amount, resolve_eid, resolve_elements_session,
 )
 
 log = logging.getLogger('xufu.subscription_cslive_go')
@@ -487,9 +487,11 @@ def run_subscription(job: dict):
         stripe = StripeHostedClient(pk=pk, proxy=proxy_url, timeout=90)
 
         guid, muid, sid = stripe.register_device_fingerprint()
-        init_resp = stripe.init(cs_id)
+        init_resp = stripe.init(cs_id, hosted_url=hosted_url)
         init_checksum = str(init_resp['init_checksum'])
         config_id = resolve_checkout_config_id(init_resp)
+        eid = resolve_eid(init_resp)
+        elements_session_id = resolve_elements_session(init_resp)
 
         tax_resp = stripe.update_tax_region(cs_id, billing_addr)
         expected_amount = resolve_expected_amount(tax_resp, init_resp)
@@ -516,6 +518,8 @@ def run_subscription(job: dict):
             checkout_config_id=config_id,
             runtime_version=build.version,
             address=billing_addr,
+            hosted_url=hosted_url,
+            elements_session_id=elements_session_id,
         )
         pm_resp = stripe.create_payment_method(pm_form)
         pm_id = str(pm_resp['id'])
@@ -541,6 +545,9 @@ def run_subscription(job: dict):
             client_session_id=client_session_id,
             checkout_config_id=config_id,
             runtime=runtime,
+            eid=eid,
+            hosted_url=hosted_url,
+            elements_session_id=elements_session_id,
         )
         _add_event(order_id, 'confirming', '正在提交付款确认…')
         subscription_retry.mark_payment_submission(order_id)
