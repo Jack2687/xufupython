@@ -431,6 +431,7 @@ def run_subscription(job: dict):
             session_payload = {
                 'access_token': creds['access_token'],
                 'account_id': creds['account_id'],
+                'email': creds.get('email') or '',
                 'session_token': creds.get('session_token') or '',
                 'cookies': creds.get('cookies') or {},
             }
