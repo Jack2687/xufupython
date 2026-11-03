@@ -1,5 +1,7 @@
 # XUFU Python 独立复刻
 
+2026-11-03 最新范围：用户要求删除 `cslive_direct_pay` 的选项、接口、队列及专属源码，只更新本地；随后提出的替代流程已经撤回，不新增流程，不提交、不推送、不更新正式环境。保留 `gener_direct_pay`（gener提链+http直连付款流程 +Go付款成功后续）及其提链、付款、账单、代理、Go 后续；`go_cslive_v1` 是该保留流程的内部协议名，不是已删除流程。独立取消续费保留。下文发布授权已在提交 `4a72671` 完成，不适用于本次删除。详见 `docs/remove-cslive-direct.md`。
+
 2026-11-03 后续发布授权：用户要求将当前项目推送 GitHub，再从正式 `/opt/1panel/apps/xufupython` 拉取并重建 xufupython 应用容器。按根目录发布 runbook 执行，保留正式数据库、业务配置及密钥，不迁入本地数据。此前“仅本地、未授权发布”为当时状态，本次授权覆盖该限制。
 
 2026-11-03 当前用户要求：仅 `gener_direct_pay` 的付款成功后续改为独立 Go 子进程，名称追加 `+Go付款成功后续`。先前提链、付款、账单随机、套餐和订单代理 session 不变，不查询出口 IP；`cslive_direct_pay` 及独立取消续费保留 Python。参考函数位于 `go-post-payment`，由 Python 加密保存进度并 ACK 后再执行下一步。用户明确不做旧订单兼容/迁移；本次仅本地更新，不推送或发布。见 `docs/go-post-payment.md`。本机启动前执行 `scripts/build_post_payment.py`（`scripts/local.py start` 已集成），Docker 构建包含独立 Go 阶段。

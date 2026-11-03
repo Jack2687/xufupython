@@ -15,8 +15,8 @@ function elapsed(events:Row[]){
  const intervals=events.flatMap(e=>{const t=time(e.created_at);return t===null?[]:[[t-Math.max(0,Number(e.elapsed_ms)||0),t]]})
  return intervals.length?durationText(Math.max(...intervals.map(x=>x[1]))-Math.min(...intervals.map(x=>x[0]))):'未记录'
 }
-export const flowNames:Record<string,string>={legacy:'旧提链 → 旧浏览器付款',legacy_protocol:'旧提链 → 旧协议付款'}
-export const paymentNames:Record<string,string>={legacy:'旧浏览器',legacy_protocol:'旧 HTTP 协议'}
+export const flowNames:Record<string,string>={legacy:'旧提链 → 旧浏览器付款',legacy_protocol:'旧提链 → 旧协议付款',gener_direct_pay:'gener 提链 → HTTP 直连付款 → Go 付款后续',cslive_go_direct_pay:'cs-live Go 提链 → HTTP 直连付款 → Go 付款后续'}
+export const paymentNames:Record<string,string>={legacy:'旧浏览器',legacy_protocol:'旧 HTTP 协议',gener_direct_pay:'HTTP 直连付款',cslive_go_direct_pay:'HTTP 直连付款'}
 const paymentStates:Record<string,[State,string]>={preparing:['running','准备中'],quoted:['running','报价已就绪'],submitting:['running','付款处理中'],checking:['running','核实付款结果'],succeeded:['completed','付款成功'],failed:['failed','付款未完成'],cancelled:['skipped','已停止'],review:['review','付款结果待核实'],action_required:['review','等待官方验证']}
 const activationStates:Record<string,[State,string]>={active:['completed','订阅已生效'],pending:['waiting','等待生效核实'],review:['review','订阅生效待核实'],not_checked:['waiting','未单独记录核实结果']}
 const renewalStates:Record<string,[State,string]>={disabled:['completed','自动续费已关闭'],kept:['skipped','按要求保留自动续费'],review:['review','关闭续费待处理'],retrying:['running','正在重新处理续费'],pending:['waiting','等待处理'],not_started:['waiting','尚未开始']}

@@ -1,5 +1,7 @@
 # gener 流程的 Go 付款后续
 
+2026-11-03 最新状态：以下 Go 实现已随 `4a72671` 推送并发布。之后用户要求仅在本地删除另一条 `cslive_direct_pay` 流程，现已移除其 Python 付款后分支；gener 的 Go 程序、适配器和共享进度保存保留，独立取消续费也保留。下文为该 Go 实现首次完成时的历史说明与验证；本次删除范围见 `remove-cslive-direct.md`。
+
 2026-11-03 用户授权：仅将 `gener_direct_pay` 的付款成功后续拆成独立 Go 程序，显示名改为 `gener提链+http直连付款流程 +Go付款成功后续`。不处理旧订单迁移，不修改 `cslive_direct_pay`，本次不发布 GitHub 或正式环境。
 
 ## 范围和步骤

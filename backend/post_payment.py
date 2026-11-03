@@ -1,21 +1,15 @@
-"""cs-live post-charge follow-up only. Never creates a checkout or submits payment."""
+"""Persistence and order validation for gener Go post-payment handling."""
 from __future__ import annotations
 
-from datetime import datetime
 import json
 import logging
 import re
-import time
-from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
-import httpx
 
 from . import db, payment_trace as trace
 from .common import decrypt, encrypt, now
-from .proxies import proxy_client
-from .renewals import COOKIE_NAME
 from .order_http_context import OrderHTTPContext
-from .http_evidence import BODY_LIMIT
 
 log = logging.getLogger('xufu.post_payment')
 BASE = 'https://chatgpt.com'
@@ -31,9 +25,6 @@ PLAN_TYPES = {
 }
 HOSTED_TYPES = dict(go='go', plus='basic', pro5x='standard', pro20x='premium',
                     promax='promax', team='team', team5x='team')
-RETRY_CANCEL = {'network_error', 'http_408', 'http_429', 'http_500',
-                'http_502', 'http_503', 'http_504'}
-RETRY_GET_STATUS = {408, 429, 500, 502, 503, 504}
 
 
 class FollowupError(Exception):
@@ -48,26 +39,6 @@ def canonical_plan(plan):
     if plan not in PLAN_TYPES:
         raise FollowupError('unsupported_plan')
     return plan
-
-
-def subscription_active(data, plan):
-    return (str(data.get('plan_type', '')).lower() in PLAN_TYPES[canonical_plan(plan)]
-            and (any(data.get(k) for k in ('active_until', 'current_period_end', 'expires_at', 'billing_period_end'))
-                 or data.get('will_renew') is True))
-
-
-def renewal_state(data):
-    states = set()
-    children = data.get('subscriptions') or data.get('items') or []
-    for item in [data] + (children if isinstance(children, list) else []):
-        if not isinstance(item, dict):
-            continue
-        if (item.get('will_renew') is False or item.get('cancel_at_period_end') is True
-                or item.get('cancels_at') or item.get('cancel_at')):
-            states.add('off')
-        if item.get('will_renew') is True or item.get('cancel_at_period_end') is False:
-            states.add('on')
-    return next(iter(states)) if len(states) == 1 else 'unknown'
 
 
 def validate_return_url(raw, cp):
@@ -109,273 +80,6 @@ def select_return_url(cp, responses):
         'stripe_session_id': cp['checkout_id'], 'processor_entity': cp['entity'],
         'plan_type': HOSTED_TYPES[cp['plan']],
     }), cp)
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError('duplicate key')
-        result[key] = value
-    return result
-
-
-def subscription_not_found(method, path, status, headers, raw):
-    if method != 'GET' or urlsplit(path).path != SUBSCRIPTIONS or status != 404 or len(raw) > 4096:
-        return False
-    media = headers.get('content-type', '').split(';', 1)[0].strip().lower()
-    if media and media != 'application/json' and not (media.startswith('application/') and media.endswith('+json')):
-        return False
-    try:
-        data = json.loads(raw, object_pairs_hook=_unique_object)
-        return isinstance(data, dict) and data.get('detail') == 'No subscription found for account'
-    except (ValueError, UnicodeError):
-        return False
-
-
-class Platform:
-    """All requests share the order's saved proxy and retain its lifetime checks."""
-    def __init__(self, client, cp, pause=time.sleep):
-        self.client, self.cp = client, cp
-        self.pause = pause
-        self.context = OrderHTTPContext(cp['credentials'], cp.get('request_context'))
-        client.cookies.update(self.context.cookies)
-
-    def _snapshot_context(self):
-        self.context.cookies = self.client.cookies
-        self.cp['request_context'] = self.context.snapshot()
-        cookies = {c.name: c.value for c in self.client.cookies.jar
-                   if c.domain.lstrip('.') == 'chatgpt.com' and COOKIE_NAME.fullmatch(c.name) and not c.is_expired()}
-        for name in list(cookies):
-            if re.search(r'\.\d+$', name) and name.rsplit('.', 1)[0] in cookies:
-                del cookies[name]
-        if cookies:
-            self.cp['credentials'].update(cookies=cookies, session_token='')
-
-    def _diagnostic_secrets(self):
-        c = self.cp['credentials']
-        values = [c.get('access_token'), c.get('session_token'), c.get('email'), self.cp.get('account_id')]
-        values.extend((c.get('cookies') or {}).values())
-        values.extend(cookie.value for cookie in self.client.cookies.jar)
-        proxy = urlsplit(self.cp.get('proxy_endpoint') or '')
-        values.extend(unquote(value) for value in (proxy.username, proxy.password) if value)
-        if proxy.username and proxy.password:
-            values.append(unquote(proxy.username) + ':' + unquote(proxy.password))
-        values.append(self.cp.get('proxy_endpoint'))
-        return values
-
-    def _check_lifetime(self):
-        if datetime.fromisoformat(self.cp['proxy_expires_at']) <= now():
-            raise FollowupError('proxy_session_expired')
-
-    @staticmethod
-    def _read(response, limit=262144):
-        raw = bytearray()
-        for chunk in response.iter_bytes():
-            raw.extend(chunk[:limit + 1 - len(raw)])
-            if len(raw) > limit:
-                raise FollowupError('invalid_response')
-        return bytes(raw)
-
-    @staticmethod
-    def _read_failure(response):
-        raw = bytearray()
-        for chunk in response.iter_bytes():
-            raw.extend(chunk[:BODY_LIMIT + 1 - len(raw)])
-            if len(raw) > BODY_LIMIT:
-                break
-        return bytes(raw)
-
-    def headers(self, path, renewal=False):
-        h = {'Authorization': 'Bearer ' + self.cp['credentials']['access_token'],
-             'Chatgpt-Account-Id': self.cp['account_id'], 'Accept': 'application/json',
-             'Origin': BASE, 'Referer': BASE + '/', 'User-Agent': 'Mozilla/5.0'}
-        h = dict(httpx.Headers(h).items())
-        h.update(self.context.headers)
-        target = urlsplit(path).path
-        if renewal:
-            target = target.replace('/backend-api', '/api/v1')
-        if target:
-            h.update({'X-Openai-Target-Path': target, 'X-Openai-Target-Route': target})
-        return h
-
-    def request(self, method, path, kind, *, renewal=False, payload=None, refresh=False, landing=False):
-        self._check_lifetime()
-        headers = self.headers('' if landing else path, renewal)
-        if refresh:
-            headers.pop('authorization', None)
-        url = path if landing else BASE + path
-        attempts = 3 if method == 'GET' else 1
-        for attempt in range(attempts):
-            self._check_lifetime()
-            retry = False
-            try:
-                with trace.request(kind) as observation:
-                    kwargs = {'headers': headers, 'follow_redirects': False}
-                    if payload is not None:
-                        kwargs['json'] = payload
-                    try:
-                        with self.client.stream(method, url, **kwargs) as response:
-                            observation.response(response.status_code, response.headers)
-                            old_secrets = self._diagnostic_secrets()
-                            # httpx absorbs the actual Set-Cookie on this same client.
-                            self._snapshot_context()
-                            raw = (self._read_failure(response) if response.status_code >= 300
-                                   else b'' if landing else self._read(response))
-                            observation.response(response.status_code, response.headers,
-                                raw.decode('utf-8', errors='replace'),
-                                secrets=old_secrets + self._diagnostic_secrets(), failure_details=True)
-                            retry = attempt + 1 < attempts and response.status_code in RETRY_GET_STATUS
-                            observation.diagnostics['retrying'] = retry
-                            if subscription_not_found(method, path, response.status_code, response.headers, raw):
-                                observation.code = 'subscription_absent'
-                                raise FollowupError('subscription_not_found')
-                            if not 200 <= response.status_code < 300:
-                                raise FollowupError('http_' + str(response.status_code))
-                            if landing:
-                                return {}  # A successful visit is not proof of activation.
-                            try:
-                                data = json.loads(raw)
-                            except (ValueError, UnicodeError):
-                                raise FollowupError('invalid_response') from None
-                            if not isinstance(data, dict):
-                                raise FollowupError('invalid_response')
-                            return data
-                    except httpx.HTTPError as exc:
-                        retry = attempt + 1 < attempts
-                        observation.diagnostics['retrying'] = retry
-                        reason = trace.error_code(exc)
-                        if reason in {'timeout', 'proxy_connect', 'dns', 'tls', 'connection'}:
-                            observation.diagnostics['network_reason'] = reason
-                        raise FollowupError('network_error') from None
-            except FollowupError:
-                if not retry:
-                    raise
-            finally:
-                self._check_lifetime()
-            wait = 0.5 * (2 ** attempt)
-            started = time.monotonic()
-            trace.record(trace.REQUEST_PHASES[kind], 'waiting', 'request_retry_wait',
-                         diagnostics={'request_kind': kind, 'retry_wait_ms': round(wait * 1000)})
-            self.pause(wait)
-            trace.record(trace.REQUEST_PHASES[kind], 'completed', 'request_retry_wait',
-                         diagnostics={'request_kind': kind, 'retry_wait_ms': round(wait * 1000),
-                                      'retry_wait_elapsed_ms': trace.round_ms(started)})
-
-    def visit_return(self, url):
-        self.request('GET', validate_return_url(url, self.cp), 'merchant_return', landing=True)
-
-    def subscriptions(self, renewal=False):
-        return self.request('GET', SUBSCRIPTIONS + '?' + urlencode({'account_id': self.cp['account_id']}),
-                            'renewal_read' if renewal else 'subscription_read', renewal=renewal)
-
-    def refresh(self):
-        c = self.cp['credentials']
-        if not c.get('session_token') and not c.get('cookies'):
-            raise FollowupError('session_token_required')
-        data = self.request('GET', '/api/auth/session?refresh=true&reason=token_expired',
-                            'session_read', renewal=True, refresh=True)
-        token = data.get('accessToken')
-        if not isinstance(token, str) or not token or data.get('error'):
-            raise FollowupError('session_expired')
-        account = data.get('account')
-        account = account if isinstance(account, dict) else {}
-        if account.get('id') and account['id'] != self.cp['account_id']:
-            raise FollowupError('account_mismatch')
-        c['access_token'] = token
-        c['refreshed_at'] = now().isoformat()
-        cookies = {x.name: x.value for x in self.client.cookies.jar
-                   if COOKIE_NAME.fullmatch(x.name) and x.domain.lstrip('.') == 'chatgpt.com'}
-        for key in list(cookies):
-            if re.search(r'\.\d+$', key) and key.rsplit('.', 1)[0] in cookies:
-                del cookies[key]
-        if cookies:
-            c.update(cookies=cookies, session_token='')
-
-    def cancel(self):
-        self.request('POST', SUBSCRIPTIONS + '/cancel', 'renewal_update', renewal=True,
-                     payload={'account_id': self.cp['account_id']})
-
-
-class Followup:
-    """Port of finishPayment / confirmActivation / disableRenewal in cs_live.go."""
-    def __init__(self, cp, platform, save, pause=time.sleep):
-        self.cp, self.platform, self.save, self.pause = cp, platform, save, pause
-
-    def finish(self):
-        self.confirm_activation()
-        if not self.cp['cancel_requested']:
-            self.save('completed')
-        else:
-            self.disable_renewal()
-
-    def confirm_activation(self):
-        cp, platform = self.cp, self.platform
-        self.save('activation')
-        if cp.get('return_url'):
-            try:
-                url = validate_return_url(cp['return_url'], cp)
-            except FollowupError:
-                trace.record('activation', 'review', 'invalid_return_url')
-            else:
-                platform.visit_return(url)
-        for attempt in range(5):
-            if attempt:
-                self.pause(2)
-            try:
-                try:
-                    data = platform.subscriptions()
-                except FollowupError as exc:
-                    if str(exc) != 'http_401':
-                        raise
-                    platform.refresh()
-                    self.save('')
-                    data = platform.subscriptions()
-            except FollowupError as exc:
-                if str(exc) == 'subscription_not_found':
-                    continue  # Entry is restricted to durable proof of successful payment.
-                raise
-            if subscription_active(data, cp['plan']):
-                cp.update(activation='active', renewal=renewal_state(data))
-                break
-        self.save('')
-        if cp['activation'] != 'active':
-            raise FollowupError('activation_pending')
-
-    def disable_renewal(self):
-        cp, platform = self.cp, self.platform
-        trace.record('renewal', 'running', 'renewal_pending')
-        platform.refresh()
-        self.save('cancellation')
-        cp['renewal'] = renewal_state(platform.subscriptions(True))
-        if cp['renewal'] == 'unknown':
-            raise FollowupError('renewal_state_unknown')
-        if cp['renewal'] == 'off':
-            self.save('completed')
-            return
-        for attempt in range(2):
-            self.save('cancellation_requested')  # Durable fence before every cancellation write.
-            try:
-                platform.cancel()
-                break
-            except FollowupError as original:
-                # IP/session guard errors cannot authorize any further business request.
-                if str(original).startswith('proxy_'):
-                    raise
-                cp['renewal'] = renewal_state(platform.subscriptions(True))
-                if cp['renewal'] == 'off':
-                    self.save('completed')
-                    return
-                if attempt or cp['renewal'] != 'on' or str(original) not in RETRY_CANCEL:
-                    raise original
-        for attempt in range(5):
-            if attempt:
-                self.pause(2)
-            cp['renewal'] = renewal_state(platform.subscriptions(True))
-            if cp['renewal'] == 'off':
-                self.save('completed')
-                return
-        raise FollowupError('cancellation_pending')
 
 
 def warning_code(exc):
@@ -425,7 +129,7 @@ def _save(order_id, cp, phase='', warning=''):
     cp.update(phase=saved['phase'], warning_code=warning)
 
 
-def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=None, executor='python'):
+def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=None, executor='go_cslive_v1'):
     # Cross-process exclusion also covers the recovery CLI. No network while holding an order row lock.
     with db.transaction() as lock:
         if not lock.scalar('SELECT pg_try_advisory_xact_lock(1886011,hashtext($1))', order_id):
@@ -434,7 +138,7 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=N
                      'FROM orders o JOIN subscription_runs s ON s.order_id=o.id WHERE o.id=$1', order_id)
         if not row or row['workflow'] != 'subscription' or row['status'] != 'succeeded' or not row['paid_at']:
             raise FollowupError('payment_evidence_missing')
-        if executor == 'go_cslive_v1' and row['subscription_flow'] != 'gener_direct_pay':
+        if executor != 'go_cslive_v1' or row['subscription_flow'] != 'gener_direct_pay':
             raise FollowupError('checkpoint_mismatch')
         saved = db.one('SELECT checkpoint_enc FROM subscription_followups WHERE order_id=$1', order_id)
         cp = json.loads(decrypt(saved['checkpoint_enc'])) if saved else None
@@ -471,12 +175,8 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=N
                     raise FollowupError('proxy_session_expired')
                 if cp['checkout_id'] != row['checkout_session_id']:
                     raise FollowupError('checkpoint_mismatch')
-                if executor == 'go_cslive_v1':
-                    from .go_post_payment import execute
-                    execute(cp, lambda phase: _save(order_id, cp, phase))
-                else:
-                    with proxy_client(endpoint, 60) as client:
-                        Followup(cp, Platform(client, cp), lambda phase: _save(order_id, cp, phase)).finish()
+                from .go_post_payment import execute
+                execute(cp, lambda phase: _save(order_id, cp, phase))
                 return {'state': 'completed', 'warning_code': ''}
             except Exception as exc:
                 if cp['phase'] == 'completed':
@@ -505,14 +205,6 @@ def record_unexpected_failure(order_id, exc):
     return {'state': 'review', 'warning_code': code}
 
 
-def finish_payment(order_id, *, plan, responses=(), proxy_url=None, request_context=None):
-    try:
-        return _run(order_id, plan=plan, responses=responses, proxy_url=proxy_url, request_context=request_context)
-    except Exception as exc:
-        return record_unexpected_failure(order_id, exc)
-
-
 def resume(order_id):
     """Explicit recovery of an existing post-charge checkpoint; no historical replay."""
-    flow = db.scalar('SELECT subscription_flow FROM subscription_runs WHERE order_id=$1', order_id)
-    return _run(order_id, executor='go_cslive_v1' if flow == 'gener_direct_pay' else 'python')
+    return _run(order_id)

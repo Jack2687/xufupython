@@ -1,4 +1,4 @@
-"""cslive_direct_pay 订阅办理：generator 提链 + pro-long-pay 付款 + 续费处理。"""
+"""gener_direct_pay 订阅办理：generator 提链 + HTTP 付款 + Go 付款后续。"""
 from __future__ import annotations
 import json
 import logging

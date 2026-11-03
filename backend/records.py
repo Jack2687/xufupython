@@ -57,7 +57,7 @@ def _saved_checkout_links(id, run, checkout):
 def public():
     cfg=config('payment')
     flow=cfg.get('subscription_flow') or ''
-    connected=cfg.get('enabled') is True and flow in ('gener_direct_pay','cslive_direct_pay')
+    connected=cfg.get('enabled') is True and flow in ('gener_direct_pay','cslive_go_direct_pay')
     return {'site':config('site'),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort'),'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected,'payment_connected':connected,'subscription_flow':flow if connected else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers')}
 
 
@@ -141,7 +141,7 @@ def catalog(request:Request):
     for p in products: p['member_fee']=fee_for(m,p['fee'])
     countries=[{'code':code,'name':name,'currency':currency} for code,name,currency in [('PH','菲律宾','PHP'),('US','美国','USD'),('JP','日本','JPY'),('SG','新加坡','SGD'),('GB','英国','GBP'),('EG','埃及','EGP'),('TR','土耳其','TRY')]]
     cfg=config('payment')
-    return {'items':products,'membership':m,'unit':'cent_R','countries':countries,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow')=='gener_direct_pay'}
+    return {'items':products,'membership':m,'unit':'cent_R','countries':countries,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay')}
 
 
 @admin_router.get('/overview')
@@ -150,7 +150,7 @@ def admin_overview():
     scheduler=dict(config('scheduler'),worker_mode=worker_mode())
     scheduler['paused']=scheduler['paused'] or worker_mode()=='off'
     cfg=config('payment')
-    return {'stats':stats,'orders':db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 8'),'risks':db.all('SELECT * FROM risk_events ORDER BY id DESC LIMIT 5'),'scheduler':scheduler,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow')=='gener_direct_pay'}
+    return {'stats':stats,'orders':db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 8'),'risks':db.all('SELECT * FROM risk_events ORDER BY id DESC LIMIT 5'),'scheduler':scheduler,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay')}
 
 
 @admin_router.get('/orders')

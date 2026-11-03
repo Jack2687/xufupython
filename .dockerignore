@@ -3,6 +3,8 @@
 !requirements.txt
 !go-post-payment/
 !go-post-payment/**
+!cs-live-source/
+!cs-live-source/**
 !generator.py
 !backend/
 !backend/**
@@ -14,3 +16,5 @@
 **/__pycache__/
 **/*.pyc
 frontend/node_modules/
+cs-live-source/cs_live
+cs-live-source/cs_live.exe

@@ -1,47 +1,53 @@
-"""cslive_direct_pay 订阅办理：cs_live binary 提链 + pro-long-pay 付款 + 续费处理。
+"""cslive_go_direct_pay 订阅办理：cs-live Go 提链 + HTTP 直连付款 + Go 付款后续。
 
-Copied from subscription.py as an independent parallel flow for cslive_direct_pay.
-The gener_direct_pay flow code in subscription.py is UNCHANGED. This module only
-differs in:
-  - FLOW constant = 'cslive_direct_pay'
-  - Router prefix = '/api/cslive' (to avoid /api/orders collision with gener)
-  - Checkout step delegates to cslive_checkout.create_checkout (Go binary)
-
-Everything else — proxy session binding, billing selection, Stripe HTTP payment,
-post-payment follow-up — is a verbatim copy of the gener flow.
+完全独立复制自 subscription.py 的流程骨架；http 付款走 cslive_go_prolong，
+付款后续走 cslive_go_post_payment，均为本流程专属副本，不与 gener_direct_pay 共享代码。
 """
 from __future__ import annotations
+
 import json
 import logging
 import time
-from urllib.parse import urlsplit, urlunsplit, quote, unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import requests
 from fastapi import APIRouter, Depends, Request
-from psycopg2.errors import UniqueViolation
 
 from . import db, payment_trace as trace
+from . import cslive_go_checkout
+from . import cslive_go_post_payment
 from . import subscription_retry
 from .common import *
 from .membership import fee_for, membership_for
 from .runtime import order_workflows, queue_message
 from .payment_transport import payment_session
-from .renewals import RenewalSession, ProviderError, inspect as inspect_session, credentials as extract_credentials
-from .prolong.stripe_checksum import build_runtime_checksums
-from .prolong.stripe_hosted import (
+from .renewals import ProviderError, inspect as inspect_session, credentials as extract_credentials
+from .cslive_go_prolong.stripe_checksum import build_runtime_checksums, fetch_stripe_build_constants
+from .cslive_go_prolong.stripe_hosted import (
     StripeHostedClient, PK_FALLBACK,
     build_payment_method_form, build_confirm_form,
     resolve_checkout_config_id, resolve_expected_amount,
 )
-from . import cslive_checkout
 
-log = logging.getLogger('xufu.subscription_cslive')
-router = APIRouter(prefix='/api/cslive', dependencies=[Depends(member)])
-FLOW = 'cslive_direct_pay'
+log = logging.getLogger('xufu.subscription_cslive_go')
+router = APIRouter(prefix='/api/cslive-go', dependencies=[Depends(member)])
+FLOW = 'cslive_go_direct_pay'
+CLAIM_LOCK = 1886006
+PROXY_LOCK = 1886007
 
 
 COUNTRIES = {'PH', 'US', 'JP', 'SG', 'EG', 'TR', 'GB'}
 CURRENCY = {'PH': 'PHP', 'US': 'USD', 'JP': 'JPY', 'SG': 'SGD', 'EG': 'EGP', 'TR': 'TRY', 'GB': 'GBP'}
+_CHECKOUT_PLAN_IDS = ('pro5x', 'pro', 'team', 'team_premium', 'plus', 'go')
+
+
+def _resolve_checkout_type(cfg: dict, product_id: str) -> str:
+    types = cfg.get('checkout_types') or {}
+    val = types.get(product_id)
+    if val in ('hosted', 'oaics'):
+        return val
+    default = cfg.get('checkout_type') or 'hosted'
+    return default if default in ('hosted', 'oaics') else 'hosted'
 
 
 def _proxy_url_with_session(resource: dict, country: str) -> tuple[str, int]:
@@ -98,9 +104,9 @@ def _proxy_url_with_session(resource: dict, country: str) -> tuple[str, int]:
 
 @trace.phase('proxy')
 def _acquire_order_proxy(order_id: str, country: str, duration_sec: int) -> str:
-    """Acquire a session-bound proxy for this order (same IP across order lifecycle)."""
+    """Acquire a session-bound proxy for this order. Same order always gets same IP."""
     with db.transaction() as q:
-        q.execute('SELECT pg_advisory_xact_lock(1886003)')
+        q.execute('SELECT pg_advisory_xact_lock($1)', PROXY_LOCK)
         existing = q.one(
             "SELECT endpoint_enc,expires_at FROM order_proxy_sessions WHERE order_id=$1 FOR UPDATE",
             order_id
@@ -155,11 +161,11 @@ def _pick_billing(q) -> dict:
 
 
 def _payment_billing(snapshot):
-    keys=('country','state','city','line1','postal_code','first_name','last_name','email')
-    require(all(isinstance(snapshot.get(k),str) and snapshot[k].strip() for k in keys),
-            '本单账单快照不完整，请重新选择系统账单资料',500)
-    address={k:snapshot[k] for k in keys[:5]}
-    return address,f"{snapshot['first_name']} {snapshot['last_name']}",snapshot['email']
+    keys = ('country', 'state', 'city', 'line1', 'postal_code', 'first_name', 'last_name', 'email')
+    require(all(isinstance(snapshot.get(k), str) and snapshot[k].strip() for k in keys),
+            '本单账单快照不完整，请重新选择系统账单资料', 500)
+    address = {k: snapshot[k] for k in keys[:5]}
+    return address, f"{snapshot['first_name']} {snapshot['last_name']}", snapshot['email']
 
 
 def _billing_snapshot(profile, account_email):
@@ -211,7 +217,10 @@ async def create_order(request: Request):
     session_raw = v.get('session')
     require(session_raw, '请提供账号 Session')
     _, sess_info = inspect_session(session_raw)
-    c, expiry = extract_credentials(session_raw if isinstance(session_raw, dict) else json.loads(session_raw) if isinstance(session_raw, str) else {}, sess_info)
+    c, expiry = extract_credentials(
+        session_raw if isinstance(session_raw, dict) else json.loads(session_raw) if isinstance(session_raw, str) else {},
+        sess_info,
+    )
 
     card = v.get('card')
     if workflow == 'subscription':
@@ -229,7 +238,8 @@ async def create_order(request: Request):
         require(product and product['enabled'], '套餐不存在或已下架', 404)
 
         rh = digest(json.dumps([workflow, product_id, country, seats], ensure_ascii=False))
-        old = q.one('SELECT id,status,request_hash FROM orders WHERE user_id=$1 AND idempotency_key=$2', user['id'], idem_key)
+        old = q.one('SELECT id,status,request_hash FROM orders WHERE user_id=$1 AND idempotency_key=$2',
+                    user['id'], idem_key)
         if old:
             require(old.get('request_hash') == rh, '同一 Idempotency-Key 不能用于不同请求', 409)
             return {'id': old['id'], 'status': old['status'], 'replayed': True}
@@ -287,19 +297,16 @@ async def create_order(request: Request):
 
 
 def claim_subscription():
-    """Claim a queued order for the cslive flow.
-
-    The setting selects new orders; queued orders keep their admission-time flow.
-    """
     cfg = config('payment')
     sched = config('scheduler')
     workflows = order_workflows()
     if not workflows or sched.get('paused') or cfg.get('enabled') is not True:
         return None
     with db.transaction() as q:
-        # Both flow queues share one admission lock and the same parallel limits.
-        q.execute('SELECT pg_advisory_xact_lock(1886005)')
-        active = q.scalar("SELECT count(*) FROM orders WHERE status='processing' AND workflow IN ('subscription','link')")
+        q.execute('SELECT pg_advisory_xact_lock($1)', CLAIM_LOCK)
+        active = q.scalar("SELECT count(*) FROM orders o JOIN subscription_runs s ON s.order_id=o.id "
+                          "WHERE o.status='processing' AND o.workflow IN ('subscription','link') AND s.subscription_flow=$1",
+                          FLOW)
         if active >= cfg['max_parallel']:
             return None
         row = q.one(
@@ -310,7 +317,8 @@ def claim_subscription():
             " FROM orders o JOIN subscription_runs s ON s.order_id=o.id"
             " WHERE o.status='queued' AND o.workflow=ANY($2::text[]) AND s.subscription_flow=$3"
             " AND s.network_retry_at<=now() AND s.payment_submit_started_at IS NULL AND s.paid_at IS NULL"
-            " AND (SELECT count(*) FROM orders x WHERE x.user_id=o.user_id AND x.status='processing' AND x.workflow IN ('subscription','link'))<$1"
+            " AND (SELECT count(*) FROM orders x JOIN subscription_runs y ON y.order_id=x.id "
+            "      WHERE x.user_id=o.user_id AND x.status='processing' AND x.workflow IN ('subscription','link') AND y.subscription_flow=$3)<$1"
             " ORDER BY o.created_at LIMIT 1 FOR UPDATE OF o SKIP LOCKED",
             cfg['per_user_parallel'], list(workflows), FLOW
         )
@@ -381,19 +389,6 @@ def _succeed_order(order_id: str, user_id: str, fee: int, last4: str, charged_am
         trace.record('funds', 'completed', 'charge', order_id=order_id, q=q)
 
 
-def _resolve_checkout_type(cfg: dict, product_id: str) -> str:
-    """Resolve checkout_type for cslive from admin per-product config.
-
-    cslive_direct_pay flow supports both hosted (长链) and oaics (短链),
-    picked per-plan from `payment.checkout_types`. Falls back to hosted.
-    """
-    types = cfg.get('checkout_types') or {}
-    kind = str(types.get(product_id) or cfg.get('checkout_type') or 'hosted').strip().lower()
-    if kind not in ('hosted', 'oaics'):
-        kind = 'hosted'
-    return kind
-
-
 @trace.order_run
 def run_subscription(job: dict):
     order_id = job['id']
@@ -405,6 +400,8 @@ def run_subscription(job: dict):
     keep_renewal = job['keep_renewal']
     workflow = job.get('workflow', 'subscription')
     cfg = config('payment')
+    product_id = job['product_id']
+    checkout_type = _resolve_checkout_type(cfg, product_id)
 
     try:
         if not job['credentials_enc'] or job['credentials_expires_at'] <= now():
@@ -415,64 +412,57 @@ def run_subscription(job: dict):
         if workflow == 'subscription':
             billing_addr, cardholder_name, billing_email = _payment_billing(billing)
 
-        # 1. Acquire session-bound proxy by order country (same IP for entire order lifecycle)
+        # 1. Session-bound proxy by order country (shared between checkout and payment)
         proxy_url = _acquire_order_proxy(order_id, country, 600)
 
         cached = subscription_retry.load_checkout(job, FLOW)
         if cached:
             _add_event(order_id, 'checkout_reused', '沿用本单已生成的结账链接，从付款阶段重试。')
         else:
-            _add_event(order_id, 'checkout', '正在通过 cs_live 生成结账链接…')
+            _add_event(order_id, 'checkout', '正在调用 cs-live Go 程序生成结账链接…')
 
-        # 2. Generate checkout link via cs_live Go binary (cslive flow)
-        product_id = job['product_id']
+        plan_canonical = cslive_go_checkout._normalize_plan(product_id)
         currency = CURRENCY.get(country, 'USD')
-        checkout_type = _resolve_checkout_type(cfg, product_id)
-
-        # Build session dict as expected by cs_live (minimum required fields)
-        cs_session = {
-            'accessToken': creds['access_token'],
-            'account': {'id': creds['account_id']},
-        }
-        if creds.get('session_token'):
-            cs_session['sessionToken'] = creds['session_token']
-        if creds.get('cookies'):
-            cs_session['cookies'] = creds['cookies']
-
-        # Team plans need seats
-        seats_default = 0
-        seats_5x = 0
-        plan_lookup = (product_id or '').strip().lower()
-        if plan_lookup in ('team', 'team_premium'):
-            seats_default = max(2, int(job.get('seats') or 2))
-            if plan_lookup == 'team_premium':
-                seats_5x = max(1, int(job.get('premium_seats') or 1))
 
         if cached:
             link_result = cached['result']
+            request_context = cached.get('request_context') or {}
         else:
-            link_result = cslive_checkout.create_checkout(
-                session=cs_session,
+            session_payload = {
+                'access_token': creds['access_token'],
+                'account_id': creds['account_id'],
+                'session_token': creds.get('session_token') or '',
+                'cookies': creds.get('cookies') or {},
+            }
+            link_result = cslive_go_checkout.create_checkout(
+                session=session_payload,
                 country=country,
-                plan=product_id,
+                plan=plan_canonical,
                 proxy_url=proxy_url,
-                seats=seats_default,
-                seats_5x=seats_5x,
+                seats=job['seats'],
+                seats_5x=job.get('premium_seats', 1),
                 interval='month',
                 checkout_type=checkout_type,
                 currency=currency,
-                browser_profile='random',
+                with_price=True,
             )
+            request_context = link_result.get('request_context') or {}
 
         require(link_result.get('ok'), f"提链失败: {link_result.get('error','unknown')}")
         require(link_result.get('payable') is not False, '提链结果不可付款，请更换账号或套餐')
         hosted_url = link_result['hostedUrl']
         cs_id = link_result['checkoutSessionId']
-        is_hosted = bool(link_result.get('is_hosted', True))
+
+        actual_country = str(link_result.get('billingCountry') or country).upper()
+        actual_currency = str(link_result.get('billingCurrency') or CURRENCY.get(country, 'USD')).upper()
+        if actual_country != country or actual_currency != CURRENCY.get(country, 'USD'):
+            _add_event(order_id, 'country_aligned',
+                       f'账单国家/币种已对齐出口：{actual_country}/{actual_currency}')
+            db.execute("UPDATE orders SET country=$2,updated_at=now() WHERE id=$1", order_id, actual_country)
 
         if not cached:
-            subscription_retry.save_checkout(order_id, FLOW, link_result)
-            _add_event(order_id, 'checkout_done', f'结账链接已生成，cs={cs_id[:24]}…')
+            subscription_retry.save_checkout(order_id, FLOW, link_result, request_context)
+            _add_event(order_id, 'checkout_done', f'长链已生成，cs={cs_id[:24]}…')
 
         # link workflow ends here — mark awaiting_payment and return checkout URL
         if workflow == 'link':
@@ -482,31 +472,24 @@ def run_subscription(job: dict):
                 trace.record('complete', 'waiting', 'link_ready', q=q)
             return
 
-        # cslive_direct_pay currently supports hosted (cs_live_*) payment via Stripe HTTP.
-        # oaics (short-link) payment uses a different ChatGPT confirm endpoint; for now
-        # mark it as awaiting_payment so the user can complete on official page.
-        if not is_hosted:
-            _add_event(order_id, 'awaiting_payment', '短链结账已生成，请在官方页面完成付款。')
+        # 2. oaics (短链) 流程不代付：由用户在 ChatGPT 侧完成付款
+        if checkout_type == 'oaics' or link_result.get('is_hosted') is False:
             with db.transaction() as q:
                 q.execute("UPDATE orders SET status='awaiting_payment',updated_at=now() WHERE id=$1", order_id)
-                trace.record('complete', 'waiting', 'oaics_awaiting_payment', q=q)
+                q.execute("INSERT INTO order_events(order_id,stage,message) VALUES($1,'awaiting_payment','短链已生成，等待用户在 ChatGPT 侧完成付款。')", order_id)
+                trace.record('complete', 'waiting', 'link_ready', q=q)
             return
 
-        # 3. Pay via pro-long-pay (copied verbatim from gener subscription.py)
+        # 3. hosted 长链：直接 HTTP 付款
         _add_event(order_id, 'payment', '正在发起付款…')
-
         pk = link_result.get('publishable_key') or PK_FALLBACK
         stripe = StripeHostedClient(pk=pk, proxy=proxy_url, timeout=90)
 
-        # 3a. Fingerprint
         guid, muid, sid = stripe.register_device_fingerprint()
-
-        # 3b. Init
         init_resp = stripe.init(cs_id)
         init_checksum = str(init_resp['init_checksum'])
         config_id = resolve_checkout_config_id(init_resp)
 
-        # 3c. Tax region
         tax_resp = stripe.update_tax_region(cs_id, billing_addr)
         expected_amount = resolve_expected_amount(tax_resp, init_resp)
         currency_from_stripe = str(tax_resp.get('currency') or init_resp.get('currency') or currency).upper()
@@ -515,10 +498,7 @@ def run_subscription(job: dict):
         client_session_id = str(_uuid.uuid4())
         _check_proxy_session_lifetime(order_id)
 
-        # 3d. Create payment method
-        from .prolong.stripe_checksum import fetch_stripe_build_constants
         build = fetch_stripe_build_constants(session=stripe.session)
-
         pm_form = build_payment_method_form(
             card_number=card['number'],
             exp_month=card['month'].zfill(2),
@@ -540,9 +520,7 @@ def run_subscription(job: dict):
         pm_id = str(pm_resp['id'])
         last4 = card['number'][-4:]
 
-        # 3e. Compute checksums and confirm
-        from .prolong.stripe_checksum import build_runtime_checksums as _brc
-        computed = _brc(pm_id, session=stripe.session)
+        computed = build_runtime_checksums(pm_id, session=stripe.session)
         runtime = {
             'version': computed['version'],
             'js_checksum': computed['js_checksum'],
@@ -567,7 +545,6 @@ def run_subscription(job: dict):
         subscription_retry.mark_payment_submission(order_id)
         confirm_resp = stripe.confirm(cs_id, confirm_form)
 
-        # 3f. Classify confirm result
         def _classify(data: dict) -> tuple[bool, str, int]:
             status = str(data.get('status') or '').lower()
             payment_status = str(data.get('payment_status') or '').lower()
@@ -607,7 +584,6 @@ def run_subscription(job: dict):
                 account_id = creds.get('account_id', '')
                 if access_token and account_id:
                     _add_event(order_id, 'approving', '正在调用 ChatGPT 确认付款…')
-                    approve_sess = None
                     try:
                         approve_sess = payment_session(proxy_url)
                         resp = trace.http_call('payment_approve', approve_sess.post,
@@ -633,9 +609,10 @@ def run_subscription(job: dict):
                     except Exception as ae:
                         log.warning('[%s] approve error: %s', order_id, trace.error_code(ae))
                     finally:
-                        if approve_sess is not None:
+                        if 'approve_sess' in locals():
                             approve_sess.close()
 
+            poll_data = None
             for _ in range(5):
                 time.sleep(1.5)
                 try:
@@ -645,8 +622,8 @@ def run_subscription(job: dict):
                         timeout=30,
                     )
                     if poll.status_code == 200:
-                        pd = poll.json()
-                        paid, decline_code, charged_minor = _classify(pd)
+                        poll_data = poll.json()
+                        paid, decline_code, charged_minor = _classify(poll_data)
                         if paid:
                             break
                         if decline_code:
@@ -660,21 +637,17 @@ def run_subscription(job: dict):
             raise RuntimeError('payment_result_unconfirmed')
 
         actual_charged = charged_minor if charged_minor > 0 else expected_amount
-
-        # 4. Mark succeeded
         _succeed_order(order_id, user_id, fee, last4, actual_charged, currency_from_stripe)
 
-        # 5. Post-charge follow-up — reuses gener's post_payment helper
+        # 4. Go 付款后续（独立副本），任何异常不触发付款退款
         try:
-            from .post_payment import finish_payment
-            try:
-                from .payment_transport import platform_context
-                ctx = platform_context.snapshot()
-            except Exception:
-                ctx = None
-            finish_payment(order_id, plan=product_id, proxy_url=proxy_url,
-                           request_context=ctx,
-                           responses=(locals().get('pd'), confirm_resp, init_resp, link_result))
+            cslive_go_post_payment.finish_payment(
+                order_id,
+                plan=plan_canonical,
+                proxy_url=proxy_url,
+                request_context=request_context,
+                responses=(locals().get('poll_data'), confirm_resp, init_resp, link_result),
+            )
         except Exception as pe:
             log.warning('[%s] post-payment setup error: %s', order_id, trace.error_code(pe))
             try:
@@ -693,19 +666,16 @@ def run_subscription(job: dict):
             _fail_order(order_id, user_id, fee, '账号授权失效，办理未完成。', trace.error_code(e))
         else:
             code = trace.error_code(e)
-            _fail_order(order_id, user_id, fee, trace.CODES.get(code, msg), code)
+            _fail_order(order_id, user_id, fee, trace.CODES[code], code)
     except Exception as e:
         if subscription_retry.handle_failure(order_id, e):
             return
         code = trace.error_code(e)
         log.error('[%s] subscription error: %s', order_id, code)
-        _fail_order(order_id, user_id, fee, trace.CODES.get(code, str(e)[:200]), code)
+        _fail_order(order_id, user_id, fee, trace.CODES[code], code)
     finally:
         if 'stripe' in locals():
-            try:
-                stripe.session.close()
-            except Exception:
-                pass
+            stripe.session.close()
 
 
 @router.get('/subscriptions/{id}')
@@ -715,8 +685,8 @@ def subscription_detail(id: str, request: Request):
         "SELECT o.id,o.status,o.product_name,o.email,o.country,o.fee,o.renewal,o.activation,o.created_at,o.updated_at,"
         "s.payment_last4,s.payment_amount,s.payment_currency,s.paid_at,s.checkout_session_id"
         " FROM orders o JOIN subscription_runs s ON s.order_id=o.id"
-        " WHERE o.id=$1 AND o.user_id=$2 AND o.workflow='subscription'",
-        id, user['id']
+        " WHERE o.id=$1 AND o.user_id=$2 AND o.workflow='subscription' AND s.subscription_flow=$3",
+        id, user['id'], FLOW,
     )
     require(row, '订单不存在', 404)
     events = db.all('SELECT stage,message,created_at FROM order_events WHERE order_id=$1 ORDER BY id', id)
@@ -729,4 +699,5 @@ def subscription_detail(id: str, request: Request):
             'charged_currency': row['payment_currency'],
             'paid_at': row['paid_at'],
         }
-    return {'order': row, 'events': events, 'payment': payment, 'checkout': {'checkout_session_id': row.get('checkout_session_id')}}
+    return {'order': row, 'events': events, 'payment': payment,
+            'checkout': {'checkout_session_id': row.get('checkout_session_id')}}
