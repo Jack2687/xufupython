@@ -14,10 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY backend/ ./backend/
-COPY generator.py ./
-COPY scripts/serve.py scripts/recover_post_payment.py ./scripts/
-COPY --from=frontend /build/webui/ ./webui/
+COPY --chown=app:app backend/ ./backend/
+COPY --chown=app:app generator.py ./
+COPY --chown=app:app scripts/serve.py scripts/recover_post_payment.py ./scripts/
+COPY --from=frontend --chown=app:app /build/webui/ ./webui/
 ARG VCS_REF=local
 LABEL org.opencontainers.image.source="https://github.com/yigerende/xufupython" \
       org.opencontainers.image.revision=$VCS_REF
