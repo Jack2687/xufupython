@@ -2,7 +2,7 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {buildPaymentJourney,currencyAmount,paymentNames} from '../src/paymentJourney.ts'
 const event=(phase,state='completed',more={})=>({phase,state,created_at:'2026-10-31T09:26:00Z',round:1,...more})
-const base=()=>({order:{id:'offline',workflow:'subscription',status:'succeeded',product_name:'Pro 5x',checkout_flow:'cslive',subscription_flow:'cslive_browser',activation:'active',renewal:'disabled',fee:1000,created_at:'2026-10-31T09:25:00Z'},payment:{state:'succeeded',amount:579464,currency:'php',charged_amount:null,fee_state:'charged'},links:[{round:1,url:'https://pay.openai.com/c/pay/cs_test_Offline'}],events:[event('complete')],billing:{state:'selected',country:'US',region:'OR',city:'Portland'}})
+const base=()=>({order:{id:'offline',workflow:'subscription',status:'succeeded',product_name:'Pro 5x',checkout_flow:'legacy',subscription_flow:'legacy',activation:'active',renewal:'disabled',fee:1000,created_at:'2026-10-31T09:25:00Z'},payment:{state:'succeeded',amount:579464,currency:'php',charged_amount:null,fee_state:'charged'},links:[{round:1,url:'https://pay.openai.com/c/pay/cs_test_Offline'}],events:[event('complete')],billing:{state:'selected',country:'US',region:'OR',city:'Portland'}})
 const stage=(j,id)=>j.stages.find(s=>s.id===id)
 
 test('paid but pending follow-up cannot display subscription completed',()=>{
@@ -29,10 +29,6 @@ test('every saved flow has consistent summary and payment labels, including dire
  for(const [flow,combination,payment] of [
   ['legacy','旧提链 → 旧浏览器付款','旧浏览器'],
   ['legacy_protocol','旧提链 → 旧协议付款','旧 HTTP 协议'],
-  ['cslive','新提链 → 新流程付款','新流程'],
-  ['cslive_enhanced','新流程增强版','新流程增强版'],
-  ['cslive_browser','新提链 → 旧浏览器付款','旧浏览器'],
-  ['cslive_direct_pay','新提链 → 直连 HTTP 付款','直连 HTTP'],
  ]){
   const data=base();data.order.subscription_flow=flow
   const j=buildPaymentJourney(data)

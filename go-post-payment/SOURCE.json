@@ -1,0 +1,117 @@
+{
+  "chatgpt_client.go": {
+    "extracted_sha256": "26710780522511d61ee5121c1d652f5f039c9475adbd041de0b140408e523851",
+    "selection": "chatgpt_PlatformBase chatgpt_Platform chatgpt_PlatformHeaderOptions chatgpt_PlatformCallOptions chatgpt_NewPlatform chatgpt_Observation Absorb Headers Call Refresh",
+    "source_sha256": "5a89b7d6fe56639d9abf43be3757a55cf780bcd5f636b2b091b3eae34be2bce5"
+  },
+  "chatgpt_parsing.go": {
+    "extracted_sha256": "d088354ec25c3b3c80852ceeb52a474afbfdcef37c3ae54e0f2e3bbe9e2cf243",
+    "selection": "chatgpt_ValidateReturnURL chatgpt_oneQuery chatgpt_RenewalState chatgpt_SubscriptionActive",
+    "source_sha256": "0164517448a3fb466a6bb23f86fbecb27d18c51b1282f453b2622dcf3776eaeb"
+  },
+  "chatgpt_subscriptions.go": {
+    "extracted_sha256": "93eb74fa10a3cbb0a2aa13961ca5013867069e20c9994c65c95c57a56cdc72dc",
+    "selection": "chatgpt_subscriptionsPath chatgpt_subscriptionNotFoundDetail chatgpt_subscriptionErrorBodyLimit Subscriptions chatgpt_isSubscriptionNotFound",
+    "source_sha256": "7aba78239ca89a9e352a969cb71aaf4ed121a9e615c3600d77a34d0fe2a3a211"
+  },
+  "fingerprint_clock.go": {
+    "extracted_sha256": "b0ac0efa04767449b590ccf579e06357e7ed8887bac3c4c6d0a1f4c779365b34",
+    "selection": "*",
+    "source_sha256": "8fd6be0f3c6e30a640554e13ab7eff87e0be5a1aece9ab9da5bf940964e22342"
+  },
+  "gptpay_flow_recovery.go": {
+    "extracted_sha256": "2a4c413eec64e1336dfbed12b7905f2dc11b0ccaccccfd9197fffcfd055c4889",
+    "selection": "finishPayment confirmActivation disableRenewal",
+    "source_sha256": "75884e79454e931088f227da8da8d33f5948df3f1c0102ed4c2232916e5c47ea"
+  },
+  "model_catalog.go": {
+    "extracted_sha256": "f2f0daa9bdf30fa3c2087a749b227d1176d15db9f6755c04f763165780f3189d",
+    "selection": "model_planDefinition model_planDefinitions model_findPlan model_MatchesSubscriptionType",
+    "source_sha256": "878ed233e96fd52fc57af420b905cd60f44b0b4b4a5c1e3c9a54a412ef17cc55"
+  },
+  "observability_diagnostic_secrets.go": {
+    "extracted_sha256": "9bac2791ea0dcfc099ffec2720a1b403aff09f2496524483e0f0c3929f248a4a",
+    "selection": "*",
+    "source_sha256": "d9ef322f6cd005a16a0d35ee09de709f3339db05230754053b1106d1e9663a37"
+  },
+  "observability_http_diagnostics.go": {
+    "extracted_sha256": "9e6b21938deb7431bb62b0ed5bf03c46dcb1d9514f70a043d15b5742b35e8ca3",
+    "selection": "*",
+    "source_sha256": "077b85264766874427bc72a3e56deeeb6922549e835718671d7b38bfd90b09d7"
+  },
+  "observability_response_redaction.go": {
+    "extracted_sha256": "953ef7f2b256ef1af1a7a2840767544366e2a14c89ba255cbf1b7c8a3125af8e",
+    "selection": "*",
+    "source_sha256": "375fe2b0f942198edce9b84c81a3e45f6b6483baee6822c6a386cd1ca70cc30e"
+  },
+  "protocol_browser.go": {
+    "extracted_sha256": "6c8a4ca8ca0924a6c7d08ea8706a54287cbd9eea943fea1310768aaf4632b18c",
+    "selection": "protocol_UserAgent protocol_BrowserProfile protocol_DefaultBrowserProfile protocol_secCHUA protocol_secCHUAFullList protocol_chromeFullVersion Headers ExtendedHints",
+    "source_sha256": "1b6a0cbee2d7749ab4a2067355f9bdc6072209bb652303aa1410408a7ffdb145"
+  },
+  "protocol_encoding.go": {
+    "extracted_sha256": "e439e3eab607e3ec3e96d133db718d401d28d0ec5fb43c913fd8e3e0bb0d02e9",
+    "selection": "*",
+    "source_sha256": "d4ce4ecdee7a3edb56c66a5ae69977f45f0e551bb70c9ac95af945069ede5c36"
+  },
+  "protocol_errors.go": {
+    "extracted_sha256": "e86e59a69afd48dfb284bd2c3cf772eceb111489973f2ecaa1c00219aad26fe0",
+    "selection": "*",
+    "source_sha256": "eb5c701c80843ff64fd20414dc929a2e3cfe38ce31395866ae40f281dfbd8831"
+  },
+  "protocol_form.go": {
+    "extracted_sha256": "76b82de21def1eb99603e772f74a0d1bd5f2c6a8662a4af69c3164e27be11338",
+    "selection": "*",
+    "source_sha256": "6157edec62ed824f3888665460f53087a7c9c832e432d375eff7a96d1b65a460"
+  },
+  "protocol_http.go": {
+    "extracted_sha256": "7c331ee4019f46d38c76f5bbc03bab9774504e6b55eaba278232fb81183840e5",
+    "selection": "*",
+    "source_sha256": "2f29ff3892b9656e9e4ec80a0052c89de9a5195e0f7fab2da09970b21f934475"
+  },
+  "protocol_json_encoding.go": {
+    "extracted_sha256": "86a75c8333dc31a1137f1716faacd54dc5f10e207470e3c578d4e2dd9a33a7df",
+    "selection": "*",
+    "source_sha256": "8129ba73597a6c0ee45e8131e8a0ecb0152e83d1c02338166dd108dc5df2c6d5"
+  },
+  "protocol_ordered_fields.go": {
+    "extracted_sha256": "6b3581437cbbb1a540e1548084263a4c5a2ad89f985dd1ee153639ed29d59bf2",
+    "selection": "*",
+    "source_sha256": "a8311f5ee3300a458c37e90080c845a27d8fc21a8021034d9de9fa87a3099586"
+  },
+  "protocol_provider_param.go": {
+    "extracted_sha256": "d3d86b2e888f82f194f38b8d578bda751868874129f10ff7cbc3647d402d3ac5",
+    "selection": "*",
+    "source_sha256": "a99f5b3965ec4a8371d7387efe7a9a987348f89357d6366ffc1812dec42349b2"
+  },
+  "protocol_values.go": {
+    "extracted_sha256": "a44ef2a086724bf66b8d93cf412ecfe4938009bf26f073987ce94732c873cd8b",
+    "selection": "*",
+    "source_sha256": "cb3b72615f7ee448652bbc0b7948e72b120f3710b45756d7b402a1673f8735b8"
+  },
+  "transport_compression.go": {
+    "extracted_sha256": "752d62360dd57165708f7d95f18de4b40505a92520b0726acb9e2ef5f7019171",
+    "selection": "*",
+    "source_sha256": "0aca9d0c9256d21ee010c0fa8ea969c2d12400ad3221993f7cb29e45585dcd09"
+  },
+  "transport_preconnect.go": {
+    "extracted_sha256": "aa8e533a281adbcc2b725888bf9a64fcbfbba9c9227d83e962856496eda7e1c6",
+    "selection": "*",
+    "source_sha256": "deaef7591e918c183d9be6535c45e465a1b70eb84b1483c60d2a52c3036dde3b"
+  },
+  "transport_proxy.go": {
+    "extracted_sha256": "9ea7a3f1ca9ce746ccf841b00a04457e3fdda6f30a44171e9a67a00d3a57c059",
+    "selection": "*",
+    "source_sha256": "de4de7b81d6f9338e94587d63d834da432e89a26256cbc95263f6b2570dc79ad"
+  },
+  "transport_timing.go": {
+    "extracted_sha256": "c7e692e4b36af1ca7922bd887f143df33d15c67b065c0835241b9d6140d55ae9",
+    "selection": "*",
+    "source_sha256": "5f094738394a9c59212849892624528e126ff06d101d987a28d4967b99d0c77a"
+  },
+  "transport_transport.go": {
+    "extracted_sha256": "03abc86273d7c99b7d48ba7de0f0978a28539cccdfa8fa782c3da12a064d9116",
+    "selection": "*",
+    "source_sha256": "41ee8f343c6cc0e9696a5a3dcb47904d7766f4161c2b5aaf2a045bb2f23f8a6e"
+  }
+}

@@ -1,6 +1,8 @@
 """Behavioral integration tests use a disposable database on the NEW local cluster only."""
+import asyncio
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, ExitStack
 from datetime import datetime,timedelta,timezone
 import hashlib
 import json
@@ -28,7 +30,6 @@ admin_conn.autocommit=True
 with admin_conn.cursor() as cur:cur.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(TEST_DB)))
 os.environ['DATABASE_URL']=urlunsplit((url.scheme,url.netloc,'/'+TEST_DB,'',''))
 os.environ['MASTER_KEY']=base64.b64encode(secrets.token_bytes(32)).decode()
-os.environ['APP_TEST_MODE']='1'
 os.environ['LOCAL_EGRESS_PROXY']='';os.environ['LOCAL_EGRESS_SOCKS_PROXY']=''
 os.environ['BOOTSTRAP_EMAIL']='admin';os.environ['BOOTSTRAP_PASSWORD']='admin'
 from backend import db
@@ -41,7 +42,8 @@ from backend.seed import DEFAULTS
 class BackendTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.client=TestClient(app);cls.client.__enter__()
+        with patch('backend.main.worker_loop'):
+            cls.client=TestClient(app);cls.client.__enter__()
         result=cls.client.post('/api/auth/login',json={'email':'admin','password':'admin'})
         assert result.status_code==200,result.text
 
@@ -360,14 +362,21 @@ class BackendTests(unittest.TestCase):
             saved=self.ok(self.client.get('/api/admin/settings'))['payment']
             self.assertEqual(saved['subscription_flow'],'gener_direct_pay')
             self.assertEqual(saved['checkout_types'],dict.fromkeys(short_links,'hosted'))
-            for flow in ('cslive','cslive_direct_pay'):
+            for flow in ('cslive','unknown_flow'):
                 v['subscription_flow']=flow
-                self.ok(self.client.put('/api/admin/settings/payment',json=v))
+                rejected=self.client.put('/api/admin/settings/payment',json=v)
+                self.assertEqual(rejected.status_code,400)
+                self.assertIn('不受支持',rejected.json()['error'])
                 saved=self.ok(self.client.get('/api/admin/settings'))['payment']
-                self.assertEqual(saved['checkout_types'],short_links)
+                self.assertEqual(saved['subscription_flow'],'gener_direct_pay')
+                self.assertEqual(saved['checkout_types'],dict.fromkeys(short_links,'hosted'))
             public=self.ok(self.client.get('/api/public'))
-            self.assertFalse(public['payment_connected'])
-            self.assertFalse(public['checkout_connected'])
+            self.assertEqual(public['payment_connected'],original['enabled'])
+            self.assertEqual(public['checkout_connected'],original['enabled'])
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(original,subscription_flow='cslive_direct_pay',checkout_types=short_links)))
+            saved=self.ok(self.client.get('/api/admin/settings'))['payment']
+            self.assertEqual(saved['subscription_flow'],'cslive_direct_pay')
+            self.assertEqual(saved['checkout_types'],short_links)
         finally:
             self.ok(self.client.put('/api/admin/settings/payment',json=original))
 
@@ -380,39 +389,40 @@ class BackendTests(unittest.TestCase):
         _,_,other=self.new_user()
         profile={'id':'bp_regression','name':'测试资料','first_name':'Fixture','last_name':'User','email':'billing@example.test','state':'NH','city':'Concord','line1':'1 Example Street','postal_code':'03301','enabled':True,'test_only':False}
         try:
-            db.execute("UPDATE settings SET value=$1 WHERE key='payment'",dict(payment,enabled=True,subscription_flow='gener_direct_pay'))
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(payment,enabled=False,subscription_flow='gener_direct_pay')))
             db.execute("UPDATE settings SET value=$1 WHERE key='billing'",dict(billing,country='US',address_templates=[profile]))
             product=db.scalar('SELECT id FROM products WHERE enabled ORDER BY sort LIMIT 1')
             payload={'workflow':'link','product_id':product,'session':self.fake_session()}
             before=db.scalar('SELECT count(*) FROM orders')
             denied=user.post('/api/orders',json=payload,headers={'Idempotency-Key':uid()})
-            self.assertEqual(denied.status_code,503)
-            self.assertIn('后台任务未启动',denied.json()['error'])
+            self.assertEqual(denied.status_code,403)
+            self.assertIn('订阅办理暂未开放',denied.json()['error'])
             self.assertEqual(db.scalar('SELECT count(*) FROM orders'),before)
-            with patch.dict(os.environ,{'APP_TEST_MODE':'0','APP_WORKER_MODE':'links'}):
-                public=self.ok(user.get('/api/public'))
-                self.assertTrue(public['checkout_connected']);self.assertFalse(public['payment_connected'])
-                blocked=user.post('/api/orders',json=dict(payload,workflow='subscription'),headers={'Idempotency-Key':uid()})
-                self.assertEqual(blocked.status_code,503)
-                self.assertIn('自动付款尚未启用',blocked.json()['error'])
-                first=self.ok(user.post('/api/orders',json=payload,headers={'Idempotency-Key':uid()}))['id']
-                self.assertEqual(db.scalar("SELECT billing_snapshot->>'email' FROM subscription_runs WHERE order_id=$1",first),profile['email'])
-                db.execute("UPDATE settings SET value=$1 WHERE key='billing'",dict(billing,country='US',address_templates=[dict(profile,email='  ')]))
-                db.execute("UPDATE orders SET workflow='subscription' WHERE id=$1",first)
-                second=self.ok(user.post('/api/orders',json=payload,headers={'Idempotency-Key':uid()}))['id']
-                job=subscription.claim_subscription()
-                self.assertEqual(job['id'],second)
-                self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',first),'queued')
-                self.assertEqual(job['billing_snapshot']['country'],'US')
-                self.assertEqual(job['billing_snapshot']['state'],'NH')
-                self.assertEqual(job['billing_snapshot']['profile_id'],profile['id'])
-                self.assertEqual(job['billing_snapshot']['email'],payload['session']['user']['email'])
-                self.assertEqual(job['billing_snapshot']['email_source'],'subscription_account')
-                self.assertEqual(db.scalar("SELECT billing_snapshot->>'email' FROM subscription_runs WHERE order_id=$1",first),profile['email'])
-                self.assertEqual(self.ok(self.client.get('/api/admin/orders/'+second))['billing']['region'],'NH')
-                self.assertIn('自动付款尚未启用',self.ok(self.client.get('/api/admin/orders/'+first))['order']['queue_message'])
-                db.execute("UPDATE settings SET value=jsonb_set(value,'{enabled}','false') WHERE key='payment'")
-                self.assertIsNone(subscription.claim_subscription())
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(payment,enabled=True,subscription_flow='gener_direct_pay')))
+            public=self.ok(user.get('/api/public'))
+            self.assertTrue(public['checkout_connected']);self.assertTrue(public['payment_connected'])
+            incomplete=user.post('/api/orders',json=dict(payload,workflow='subscription'),headers={'Idempotency-Key':uid()})
+            self.assertEqual(incomplete.status_code,400)
+            self.assertIn('请确认服务约定',incomplete.json()['error'])
+            first=self.ok(user.post('/api/orders',json=payload,headers={'Idempotency-Key':uid()}))['id']
+            self.assertEqual(db.scalar("SELECT billing_snapshot->>'email' FROM subscription_runs WHERE order_id=$1",first),profile['email'])
+            db.execute("UPDATE settings SET value=$1 WHERE key='billing'",dict(billing,country='US',address_templates=[dict(profile,email='  ')]))
+            db.execute("UPDATE orders SET workflow='subscription',status='awaiting_payment' WHERE id=$1",first)
+            second=self.ok(user.post('/api/orders',json=payload,headers={'Idempotency-Key':uid()}))['id']
+            job=subscription.claim_subscription()
+            self.assertEqual(job['id'],second)
+            self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',first),'awaiting_payment')
+            self.assertEqual(job['billing_snapshot']['country'],'US')
+            self.assertEqual(job['billing_snapshot']['state'],'NH')
+            self.assertEqual(job['billing_snapshot']['profile_id'],profile['id'])
+            self.assertEqual(job['billing_snapshot']['email'],payload['session']['user']['email'])
+            self.assertEqual(job['billing_snapshot']['email_source'],'subscription_account')
+            self.assertEqual(db.scalar("SELECT billing_snapshot->>'email' FROM subscription_runs WHERE order_id=$1",first),profile['email'])
+            self.assertEqual(self.ok(self.client.get('/api/admin/orders/'+second))['billing']['region'],'NH')
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(payment,enabled=False,subscription_flow='gener_direct_pay')))
+            db.execute("UPDATE orders SET status='queued' WHERE id=$1",first)
+            self.assertIn('站内付款尚未开启',self.ok(self.client.get('/api/admin/orders/'+first))['order']['queue_message'])
+            self.assertIsNone(subscription.claim_subscription())
             subscription._add_event(second,'failed','fixture failure')
             detail=self.ok(self.client.get('/api/admin/orders/'+second))
             customer=self.ok(user.get('/api/orders/'+second))
@@ -437,20 +447,300 @@ class BackendTests(unittest.TestCase):
             db.execute("UPDATE settings SET value=$1 WHERE key='billing'",billing)
             user.close();other.close()
 
-    def test_17_worker_links_mode(self):
+    def test_16b_flow_switch_preserves_order_ownership(self):
+        from backend import subscription,subscription_cslive
+        saved=self.ok(self.client.get('/api/admin/settings'))
+        user_id,_,user=self.new_user()
+        product=db.scalar('SELECT id FROM products WHERE enabled ORDER BY sort LIMIT 1')
+        profile={'id':'bp_flow','first_name':'Fixture','last_name':'User','email':'billing@example.test','state':'NH','city':'Concord','line1':'1 Example Street','postal_code':'03301','enabled':True,'test_only':False}
+        payload={'product_id':product,'session':self.fake_session(refresh=True),'accepted':True,
+                 'card':{'number':'4242424242424242','month':'12','year':'2030','cvc':'123'}}
+        flows=(subscription,subscription_cslive);orders={};keys={}
+        try:
+            db.execute('UPDATE users SET balance=1000000 WHERE id=$1',user_id)
+            db.execute("UPDATE settings SET value=$1 WHERE key='billing'",dict(saved['billing'],address_templates=[profile]))
+            self.ok(self.client.put('/api/admin/settings/scheduler',json=dict(saved['scheduler'],paused=True)))
+            for module,path in ((subscription,'/api/orders'),(subscription_cslive,'/api/cslive/orders')):
+                self.ok(self.client.put('/api/admin/settings/payment',json=dict(saved['payment'],enabled=True,subscription_flow=module.FLOW,max_parallel=4,per_user_parallel=4)))
+                for workflow in ('link','subscription'):
+                    key=uid();keys[module.FLOW,workflow]=key
+                    order_id=self.ok(user.post(path,json=dict(payload,workflow=workflow),headers={'Idempotency-Key':key}))['id']
+                    orders[module.FLOW,workflow]=order_id
+                    self.assertEqual(db.scalar('SELECT subscription_flow FROM subscription_runs WHERE order_id=$1',order_id),module.FLOW)
+            # A repeated request after a switch returns the original order, without reassigning it.
+            replay=self.ok(user.post('/api/cslive/orders',json=dict(payload,workflow='link'),headers={'Idempotency-Key':keys[subscription.FLOW,'link']}))
+            self.assertEqual(replay['id'],orders[subscription.FLOW,'link']);self.assertTrue(replay['replayed'])
+            self.assertEqual(db.scalar('SELECT subscription_flow FROM subscription_runs WHERE order_id=$1',replay['id']),subscription.FLOW)
+            self.assertEqual(user.post('/api/orders',json=dict(payload,workflow='link'),headers={'Idempotency-Key':uid()}).status_code,403)
+            for module in flows:self.assertIsNone(module.claim_subscription())
+            self.ok(self.client.put('/api/admin/settings/scheduler',json=dict(saved['scheduler'],paused=False)))
+            # CSLive must skip the older gen jobs, and gen must drain despite the new default.
+            for module in reversed(flows):
+                job=module.claim_subscription()
+                self.assertEqual(job['id'],orders[module.FLOW,'link'])
+                self.assertEqual(job['subscription_flow'],module.FLOW)
+                self.assertEqual(job['billing_snapshot']['profile_id'],profile['id'])
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(saved['payment'],enabled=True,subscription_flow=subscription.FLOW,max_parallel=4,per_user_parallel=4)))
+            for module in flows:
+                job=module.claim_subscription()
+                self.assertEqual(job['id'],orders[module.FLOW,'subscription'])
+                self.assertEqual(job['subscription_flow'],module.FLOW)
+            for module in flows:self.assertIsNone(module.claim_subscription())
+            self.assertEqual(db.scalar("SELECT count(*) FROM payment_trace_events WHERE order_id=ANY($1::text[]) AND phase='queue' AND state='completed'",list(orders.values())),4)
+            db.initialize()  # A restart/schema initialization must preserve ownership.
+            for (flow,_),order_id in orders.items():
+                self.assertEqual(db.scalar('SELECT subscription_flow FROM subscription_runs WHERE order_id=$1',order_id),flow)
+        finally:
+            db.execute("UPDATE orders SET status='failed' WHERE user_id=$1",user_id)
+            for key in ('payment','scheduler','billing'):db.execute('UPDATE settings SET value=$2 WHERE key=$1',key,saved[key])
+            user.close()
+
+    def test_16c_flow_claims_share_limits_and_reject_unknown_ownership(self):
+        from backend import subscription,subscription_cslive
+        from threading import Barrier
+        saved=self.ok(self.client.get('/api/admin/settings'))
+        users=[self.new_user(),self.new_user()];ids=[]
+        flows=(subscription,subscription_cslive)
+        try:
+            self.ok(self.client.put('/api/admin/settings/scheduler',json=dict(saved['scheduler'],paused=False)))
+            cfg=dict(saved['payment'],enabled=True,subscription_flow=subscription_cslive.FLOW,max_parallel=1,per_user_parallel=1)
+            self.ok(self.client.put('/api/admin/settings/payment',json=cfg))
+            for module,(user_id,_,_) in zip(flows,users):
+                order_id,_,_=self.trace_order();ids.append(order_id)
+                db.execute("UPDATE orders SET user_id=$2,status='queued' WHERE id=$1",order_id,user_id)
+                db.execute('UPDATE subscription_runs SET user_id=$2,subscription_flow=$3 WHERE order_id=$1',order_id,user_id,module.FLOW)
+            # Concurrent claimers must not each consume the same last global slot.
+            barrier=Barrier(2)
+            def claim(module):
+                barrier.wait(timeout=5)
+                return module.claim_subscription()
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results=list(pool.map(claim,flows))
+            self.assertEqual(sum(job is not None for job in results),1)
+            self.assertEqual(db.scalar("SELECT count(*) FROM orders WHERE id=ANY($1::text[]) AND status='processing'",ids),1)
+            for module,job in zip(flows,results):
+                if job:self.assertEqual(job['subscription_flow'],module.FLOW)
+            db.execute("UPDATE orders SET status='queued',user_id=$2 WHERE id=ANY($1::text[])",ids,users[0][0])
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(cfg,max_parallel=2)))
+            self.assertEqual(subscription.claim_subscription()['id'],ids[0])
+            self.assertIsNone(subscription_cslive.claim_subscription())  # Shared per-user limit.
+            db.execute("UPDATE orders SET status='queued' WHERE id=ANY($1::text[])",ids)
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(cfg,enabled=False)))
+            for module in flows:self.assertIsNone(module.claim_subscription())
+            self.ok(self.client.put('/api/admin/settings/payment',json=cfg))
+            db.execute("UPDATE orders SET status='failed' WHERE id=ANY($1::text[])",ids)
+            legacy,_,_=self.trace_order();ids.append(legacy)
+            db.execute("UPDATE orders SET status='queued' WHERE id=$1",legacy)
+            self.assertEqual(db.scalar('SELECT subscription_flow FROM subscription_runs WHERE order_id=$1',legacy),'')
+            for module in flows:self.assertIsNone(module.claim_subscription())
+            self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',legacy),'queued')
+        finally:
+            db.execute("UPDATE orders SET status='failed' WHERE id=ANY($1::text[])",ids)
+            for key in ('payment','scheduler'):db.execute('UPDATE settings SET value=$2 WHERE key=$1',key,saved[key])
+            for _,_,client in users:client.close()
+
+    @contextmanager
+    def retry_fixture(self, module, workflow='subscription', limit=2):
+        settings=self.ok(self.client.get('/api/admin/settings'))
+        user_id,_,user=self.new_user()
+        profile={'id':'bp_retry','first_name':'Fixture','last_name':'User','email':'billing@example.test',
+                 'state':'NH','city':'Concord','line1':'1 Fixture Street','postal_code':'03301','enabled':True,'test_only':False}
+        try:
+            db.execute("UPDATE settings SET value=$1 WHERE key='payment'",dict(settings['payment'],enabled=True,
+                       subscription_flow=module.FLOW,network_restart_limit=limit,max_parallel=4,per_user_parallel=4))
+            db.execute("UPDATE settings SET value=$1 WHERE key='scheduler'",dict(settings['scheduler'],paused=False,retry_delay_seconds=5))
+            db.execute("UPDATE settings SET value=$1 WHERE key='billing'",dict(settings['billing'],address_templates=[profile]))
+            db.execute('UPDATE users SET balance=1000000 WHERE id=$1',user_id)
+            product=db.scalar('SELECT id FROM products WHERE enabled ORDER BY sort LIMIT 1')
+            path='/api/cslive/orders' if module.FLOW=='cslive_direct_pay' else '/api/orders'
+            payload={'workflow':workflow,'product_id':product,'session':self.fake_session(refresh=True),'accepted':True,
+                     'card':{'number':'4242424242424242','month':'12','year':'2030','cvc':'123'}}
+            order=self.ok(user.post(path,json=payload,headers={'Idempotency-Key':uid()}))['id']
+            db.execute('INSERT INTO order_proxy_sessions(order_id,resource_id,endpoint_enc,expires_at) VALUES($1,$2,$3,$4)',
+                       order,'fixture',encrypt('http://fixture:secret@proxy.example.test:8080'),now()+timedelta(hours=1))
+            job=module.claim_subscription();self.assertEqual(job['id'],order)
+            yield job
+        finally:
+            db.execute("UPDATE orders SET status='failed' WHERE user_id=$1",user_id)
+            for key in ('payment','scheduler','billing'):db.execute('UPDATE settings SET value=$2 WHERE key=$1',key,settings[key])
+            user.close()
+
+    @contextmanager
+    def retry_network(self, module):
+        target='backend.cslive_checkout.create_checkout' if module.FLOW=='cslive_direct_pay' else 'generator.generate_pro_long_link'
+        result={'ok':True,'payable':True,'hostedUrl':'https://pay.openai.com/c/pay/cs_test_retry',
+                'checkoutSessionId':'cs_test_retry','is_hosted':True}
+        with ExitStack() as stack:
+            stack.enter_context(patch('requests.sessions.Session.request',side_effect=AssertionError('External network forbidden')))
+            generate=stack.enter_context(patch(target,return_value=result))
+            factory=stack.enter_context(patch.object(module,'StripeHostedClient'))
+            stripe=factory.return_value
+            stripe.register_device_fingerprint.return_value=('fixture','fixture','fixture')
+            stripe.init.return_value={'init_checksum':'fixture','config_id':'fixture'}
+            stripe.update_tax_region.return_value={'total_summary':{'due':100},'currency':'USD'}
+            stripe.create_payment_method.return_value={'id':'pm_fixture'}
+            stripe.confirm.return_value={'status':'complete','payment_status':'paid'}
+            stack.enter_context(patch('backend.prolong.stripe_checksum.fetch_stripe_build_constants',return_value=Mock(version='fixture')))
+            stack.enter_context(patch('backend.prolong.stripe_checksum.build_runtime_checksums',return_value={'version':'fixture','js_checksum':'fixture','rv_timestamp':'fixture'}))
+            followup=stack.enter_context(patch('backend.go_post_payment.finish_payment' if module.FLOW=='gener_direct_pay' else 'backend.post_payment.finish_payment'))
+            yield generate,stripe,followup
+
+    def ready_retry(self, module, order_id):
+        db.execute("UPDATE subscription_runs SET network_retry_at=now()-interval '1 second' WHERE order_id=$1",order_id)
+        job=module.claim_subscription();self.assertEqual(job['id'],order_id)
+        return job
+
+    def test_16d_network_retry_reuses_checkout_billing_proxy_and_fee(self):
+        import requests
+        from backend import subscription,subscription_cslive,subscription_retry
+        for module in (subscription,subscription_cslive):
+            with self.subTest(flow=module.FLOW),self.retry_fixture(module) as job,self.retry_network(module) as (generate,stripe,followup):
+                order_id=job['id'];user_id=job['user_id']
+                original_proxy=db.scalar('SELECT endpoint_enc FROM order_proxy_sessions WHERE order_id=$1',order_id)
+                original_billing=job['billing_snapshot']
+                stripe.init.side_effect=[requests.exceptions.ConnectionError('fixture connection lost'),{'init_checksum':'fixture','config_id':'fixture'}]
+                module.run_subscription(job)
+                self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'queued')
+                self.assertEqual(db.scalar('SELECT network_retry_count FROM subscription_runs WHERE order_id=$1',order_id),1)
+                self.assertEqual(db.scalar("SELECT count(*) FROM ledger WHERE order_id=$1 AND kind='unfreeze'",order_id),0)
+                self.assertIsNone(module.claim_subscription())  # Delay is enforced without sleeping a worker.
+                stripe.confirm.assert_not_called()
+                cached_context=json.loads(decrypt(db.scalar('SELECT checkout_checkpoint_enc FROM subscription_runs WHERE order_id=$1',order_id)))['request_context']
+                # A different selected flow must not steal this waiting retry.
+                other=subscription_cslive if module is subscription else subscription
+                cfg=db.scalar("SELECT value FROM settings WHERE key='payment'")
+                db.execute("UPDATE settings SET value=$1 WHERE key='payment'",dict(cfg,subscription_flow=other.FLOW))
+                db.execute("UPDATE subscription_runs SET network_retry_at=now()-interval '1 second' WHERE order_id=$1",order_id)
+                self.assertIsNone(other.claim_subscription())
+                retry=self.ready_retry(module,order_id)
+                self.assertEqual(retry['billing_snapshot'],original_billing)
+                self.assertEqual(retry['trace_round'],2)
+                # Persisted checkout context, not a second generator call.
+                self.assertEqual(subscription_retry.load_checkout(retry,module.FLOW)['result']['checkoutSessionId'],'cs_test_retry')
+                module.run_subscription(retry)
+                self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'succeeded')
+                self.assertEqual(generate.call_count,1)
+                self.assertEqual([call.args[0] for call in stripe.init.call_args_list],['cs_test_retry','cs_test_retry'])
+                self.assertEqual(stripe.confirm.call_count,1)
+                self.assertEqual(followup.call_count,1)
+                if module is subscription:
+                    self.assertEqual(followup.call_args.kwargs['request_context'],cached_context)
+                    self.assertTrue(cached_context['cookies'])
+                self.assertEqual(db.scalar('SELECT endpoint_enc FROM order_proxy_sessions WHERE order_id=$1',order_id),original_proxy)
+                self.assertEqual(db.scalar("SELECT count(*) FROM ledger WHERE order_id=$1 AND kind='freeze'",order_id),1)
+                self.assertEqual(db.scalar("SELECT count(*) FROM ledger WHERE order_id=$1 AND kind='charge'",order_id),1)
+                self.assertEqual(db.scalar('SELECT frozen FROM users WHERE id=$1',user_id),0)
+                self.assertEqual(db.scalar('SELECT balance FROM users WHERE id=$1',user_id),1000000-job['fee'])
+                module.run_subscription(retry)  # A stale job cannot replay a successful charge.
+                self.assertEqual(stripe.confirm.call_count,1)
+
+    def test_16e_network_retry_limit_and_disabled_retry(self):
+        from backend import subscription,subscription_cslive
+        for module in (subscription,subscription_cslive):
+            for workflow,limit in (('subscription',2),('link',0)):
+                with self.subTest(flow=module.FLOW,workflow=workflow),self.retry_fixture(module,workflow,limit) as job,self.retry_network(module) as (generate,stripe,followup):
+                    order_id=job['id']
+                    generate.side_effect=TimeoutError('fixture timed out')
+                    for attempt in range(limit+1):
+                        module.run_subscription(job)
+                        if attempt<limit:
+                            self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'queued')
+                            job=self.ready_retry(module,order_id)
+                    self.assertEqual(generate.call_count,limit+1)
+                    self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'failed')
+                    self.assertEqual(db.scalar('SELECT network_retry_count FROM subscription_runs WHERE order_id=$1',order_id),limit)
+                    self.assertEqual(db.scalar("SELECT count(*) FROM ledger WHERE order_id=$1 AND kind='unfreeze'",order_id),int(workflow=='subscription'))
+                    self.assertEqual(db.scalar('SELECT frozen FROM users WHERE id=$1',job['user_id']),0)
+                    stripe.confirm.assert_not_called();followup.assert_not_called()
+
+    def test_16f_network_retry_never_replays_uncertain_payment(self):
+        import requests
+        from backend import subscription,subscription_cslive
+        for module in (subscription,subscription_cslive):
+            with self.subTest(flow=module.FLOW),self.retry_fixture(module) as job,self.retry_network(module) as (generate,stripe,followup):
+                stripe.confirm.side_effect=requests.exceptions.ReadTimeout('fixture lost confirmation response')
+                module.run_subscription(job)
+                order_id=job['id']
+                self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'review')
+                self.assertIsNotNone(db.scalar('SELECT payment_submit_started_at FROM subscription_runs WHERE order_id=$1',order_id))
+                self.assertEqual(db.scalar('SELECT network_retry_count FROM subscription_runs WHERE order_id=$1',order_id),0)
+                self.assertEqual(db.scalar('SELECT frozen FROM users WHERE id=$1',job['user_id']),job['fee'])
+                self.assertEqual(db.scalar("SELECT count(*) FROM ledger WHERE order_id=$1 AND kind IN ('unfreeze','charge')",order_id),0)
+                module.run_subscription(job)
+                self.assertEqual(stripe.confirm.call_count,1)
+                db.execute("UPDATE orders SET status='queued' WHERE id=$1",order_id)
+                self.assertIsNone(module.claim_subscription())
+                followup.assert_not_called()
+
+    def test_16g_network_retry_does_not_retry_access_denial(self):
+        from backend import subscription
+        with self.retry_fixture(subscription) as job,self.retry_network(subscription) as (generate,stripe,followup):
+            stripe.init.side_effect=RuntimeError('init failed [403]')
+            subscription.run_subscription(job)
+            self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',job['id']),'failed')
+            self.assertEqual(db.scalar('SELECT network_retry_count FROM subscription_runs WHERE order_id=$1',job['id']),0)
+            stripe.confirm.assert_not_called();followup.assert_not_called()
+
+    def test_16h_network_retry_configuration_validation(self):
+        payment=self.ok(self.client.get('/api/admin/settings'))['payment']
+        try:
+            for count in (0,2,5):
+                self.ok(self.client.put('/api/admin/settings/payment',json=dict(payment,network_restart_limit=count)))
+                self.assertEqual(self.ok(self.client.get('/api/admin/settings'))['payment']['network_restart_limit'],count)
+            for count in (-1,6,True,'2'):
+                self.assertEqual(self.client.put('/api/admin/settings/payment',json=dict(payment,network_restart_limit=count)).status_code,400)
+        finally:self.ok(self.client.put('/api/admin/settings/payment',json=payment))
+
+    def test_17_worker_follows_admin_payment_toggle(self):
         from backend import main, runtime
-        with patch.dict(os.environ,{'APP_TEST_MODE':'0','APP_WORKER_MODE':'links'}):
-            self.assertEqual(runtime.order_workflows(),('link',))
-            stop=Mock();stop.wait.side_effect=[False,True]
-            with patch.object(main,'ThreadPoolExecutor') as pool, patch.object(main,'maintenance'), patch.object(main.renewals,'claim') as renewal, patch.object(main.subscription,'claim_subscription',return_value={'workflow':'link'}) as claim:
+        payment=self.ok(self.client.get('/api/admin/settings'))['payment']
+        states=iter((False,True,False,None))
+        observed=[]
+        def advance(_):
+            enabled=next(states)
+            if enabled is None:return True
+            self.ok(self.client.put('/api/admin/settings/payment',json=dict(payment,enabled=enabled,subscription_flow='gener_direct_pay')))
+            public=self.ok(self.client.get('/api/public'))
+            self.assertEqual(public['payment_connected'],enabled)
+            self.assertEqual(public['checkout_connected'],enabled)
+            observed.append(runtime.worker_mode())
+            self.assertEqual(runtime.order_workflows(),('link','subscription') if enabled else ())
+            return False
+        try:
+            stop=Mock();stop.wait.side_effect=advance
+            with patch.dict(os.environ,{'APP_TEST_MODE':'1','APP_WORKER_MODE':'off'}), patch.object(main,'ThreadPoolExecutor') as pool, patch.object(main,'maintenance'), patch.object(main.renewals,'claim',return_value={'id':'renewal-fixture'}) as renewal, patch.object(main.subscription,'claim_subscription',return_value={'workflow':'link'}) as claim:
+                pool.return_value.submit.return_value.done.return_value=True
                 main.worker_loop(stop)
-                renewal.assert_not_called();claim.assert_called_once()
-                self.assertEqual(pool.return_value.submit.call_count,2)
+                self.assertEqual(observed,['off','all','off'])
+                renewal.assert_called_once();claim.assert_called_once()
+                self.assertEqual(pool.return_value.submit.call_count,5)
                 self.assertEqual(pool.return_value.submit.call_args_list[0].args[0],main.proxies.run_check)
                 pool.return_value.shutdown.assert_called_once_with(wait=True,cancel_futures=True)
-        with patch.dict(os.environ,{'APP_TEST_MODE':'0','APP_WORKER_MODE':'invalid'}):
+            with patch.object(runtime.db,'scalar',side_effect=RuntimeError('database unavailable')):
+                self.assertEqual(runtime.worker_mode(),'off')
+        finally:
+            self.ok(self.client.put('/api/admin/settings/payment',json=payment))
+
+    def test_17_scheduler_starts_while_payment_is_disabled(self):
+        from backend import main, runtime
+        payment=db.scalar("SELECT value FROM settings WHERE key='payment'")
+        try:
+            db.execute("UPDATE settings SET value=$1 WHERE key='payment'",dict(payment,enabled=False))
             self.assertEqual(runtime.worker_mode(),'off')
-        self.assertEqual(runtime.order_workflows(),())
+            async def join_thread(join,*args):
+                return join(*args)
+            async def exercise():
+                with patch.object(main.db,'initialize'), patch.object(main,'seed'), patch.object(main.db,'close'), patch.object(main.threading,'Thread') as thread, patch.object(main.asyncio,'to_thread',side_effect=join_thread):
+                    async with main.lifespan(app):
+                        thread.return_value.start.assert_called_once()
+                        self.assertEqual(thread.call_args.kwargs['name'],'xufu-scheduler')
+                        stop=thread.call_args.kwargs['args'][0]
+                        self.assertFalse(stop.is_set())
+                    self.assertTrue(stop.is_set())
+                    thread.return_value.join.assert_called_once_with(115)
+            asyncio.run(exercise())
+        finally:
+            db.execute("UPDATE settings SET value=$1 WHERE key='payment'",payment)
 
 
     def test_18_local_proxy_chain_and_dns(self):
@@ -572,25 +862,26 @@ class BackendTests(unittest.TestCase):
         job={'id':order_id,'user_id':owner,'fee':0,'country':'PH','keep_renewal':False,'workflow':'link','product_id':product,'seats':1,
              'credentials_enc':encrypt(json.dumps({'access_token':self.fake_session()['accessToken'],'account_id':'fixture'})),
              'credentials_expires_at':now()+timedelta(hours=1),'billing_snapshot':{},'trace_round':1}
-        ip_response=httpx.Response(200,json={'ip':'8.8.4.4'},request=httpx.Request('GET','https://ipinfo.io/json'))
         checkout={'checkout_session_id':'cs_test_fixture','tag':'hosted_checkout_session','checkout_ui_mode':'hosted','url':'https://pay.openai.com/c/pay/cs_test_fixture'}
-        responses=[Mock(returncode=0,stdout=json.dumps({'ip':'8.8.4.4','country':'PH'})+'\n__HTTP_STATUS__:200'),Mock(returncode=0,stdout=json.dumps(checkout)+'\n__HTTP_STATUS__:200')]
-        with patch.object(subscription,'_acquire_order_proxy',return_value='http://proxy.example.test:8080'),patch.object(subscription,'proxy_client') as proxy,patch.object(generator,'check_ip_direct',return_value={}),patch.object(generator.subprocess,'run',side_effect=responses),patch.object(generator,'_find_curl',return_value='curl'),patch.object(subscription,'StripeHostedClient') as payment:
-            proxy.return_value.__enter__.return_value.get.return_value=ip_response
+        responses=[Mock(returncode=0,stdout=json.dumps(checkout)+'\n__HTTP_STATUS__:200')]
+        with patch.object(subscription,'_acquire_order_proxy',return_value='http://proxy.example.test:8080'),patch.object(generator.subprocess,'run',side_effect=responses) as network,patch.object(generator,'_find_curl',return_value='curl'),patch.object(subscription,'StripeHostedClient') as payment:
             subscription.run_subscription(job)
             payment.assert_not_called()
+            self.assertEqual(network.call_count,1)
         self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'awaiting_payment')
         rows=trace.details(order_id)
         self.assertEqual(rows[-1]['code'],'link_ready')
         self.assertTrue(any(e['diagnostics'].get('request_kind')=='checkout_create' and e['http_status']==200 for e in rows))
-        self.assertTrue(any(e['diagnostics'].get('request_kind')=='exit_probe' and e['state']=='completed' for e in rows))
+        self.assertFalse(any(e['diagnostics'].get('request_kind') in ('exit_probe','direct_exit_probe') for e in rows))
         self.assertFalse(any(e['phase'] in ('card_prepare','confirming','result') for e in rows))
         failed,owner,product=self.trace_order();job=dict(job,id=failed)
-        with patch.object(subscription,'_acquire_order_proxy',return_value='http://proxy.example.test:8080'),patch.object(subscription,'proxy_client',side_effect=httpx.ConnectTimeout('secret-proxy-credential')),patch.object(generator,'generate_pro_long_link') as generate:
+        with patch.object(subscription,'_acquire_order_proxy',side_effect=httpx.ConnectTimeout('secret-proxy-credential')),patch.object(generator,'generate_pro_long_link') as generate:
             subscription.run_subscription(job)
             generate.assert_not_called()
-        self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',failed),'failed')
-        self.assertEqual(trace.details(failed)[-1]['code'],'timeout')
+        self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',failed),'queued')
+        self.assertEqual(trace.details(failed)[-1]['code'],'network_retry_scheduled')
+        self.assertEqual(trace.details(failed)[-1]['diagnostics']['network_reason'],'timeout')
+        db.execute("UPDATE orders SET status='failed' WHERE id=$1",failed)
         self.assertNotIn('secret-proxy-credential',json.dumps(self.ok(self.client.get('/api/admin/orders/'+failed))))
         # Historical business rows remain historical, without invented HTTP metadata.
         legacy,_,_=self.trace_order()
@@ -679,14 +970,19 @@ class BackendTests(unittest.TestCase):
              'credentials_enc':encrypt(json.dumps({'access_token':'fixture','account_id':'fixture'})),
              'credentials_expires_at':now()+timedelta(hours=1),'billing_snapshot':snapshot,'trace_round':1,
              'card_enc':encrypt(json.dumps({'number':'4242424242424242','month':'12','year':'2030','cvc':'123'}))}
-        db.execute('UPDATE subscription_runs SET credentials_enc=$2 WHERE order_id=$1',order_id,job['credentials_enc'])
+        db.execute("UPDATE subscription_runs SET credentials_enc=$2,subscription_flow='gener_direct_pay' WHERE order_id=$1",order_id,job['credentials_enc'])
         db.execute('INSERT INTO order_proxy_sessions(order_id,resource_id,endpoint_enc,expected_ip,expires_at) VALUES($1,$2,$3,$4,$5)',
                    order_id,'fixture',encrypt('http://proxy.example.test:8080'),'8.8.4.4',now()+timedelta(minutes=10))
         def followup_http(request):
-            if request.url.host=='ipinfo.io':return httpx.Response(200,json={'ip':'8.8.4.4'})
+            self.assertEqual(request.url.host,'chatgpt.com')
             if request.url.path=='/checkout/verify':return httpx.Response(200,text='callback')
             if request.url.path=='/backend-api/subscriptions':return httpx.Response(200,json={'plan_type':{'pro5x':'standard','pro':'premium','team':'team','team_premium':'prolite'}.get(product,'premium'),'will_renew':True})
             raise AssertionError('Unexpected post-payment request')
+        def go_followup_fixture(cp,save):
+            from backend.post_payment import Followup,Platform
+            self.assertEqual(cp['executor'],'go_cslive_v1')
+            with httpx.Client(transport=httpx.MockTransport(followup_http)) as client:
+                Followup(cp,Platform(client,cp),save).finish()
         sent=[]
         def post(url,**kwargs):
             sent.append((url,kwargs['data']))
@@ -699,11 +995,10 @@ class BackendTests(unittest.TestCase):
              patch('requests.sessions.Session.post',side_effect=post), \
              patch('generator.generate_pro_long_link',return_value={'ok':True,'payable':True,'hostedUrl':'https://pay.openai.com/c/pay/cs_test_fixture','checkoutSessionId':'cs_test_fixture'}), \
              patch.object(subscription,'_acquire_order_proxy',return_value='http://proxy.example.test:8080'), \
-             patch.object(subscription,'_check_exit_ip',return_value='8.8.4.4'),patch.object(subscription,'_verify_exit_ip'), \
              patch.object(StripeHostedClient,'register_device_fingerprint',return_value=('offline','offline','offline')), \
              patch('backend.prolong.stripe_checksum.fetch_stripe_build_constants',return_value=Mock(version='offline')), \
              patch('backend.prolong.stripe_checksum.build_runtime_checksums',return_value={'version':'offline','js_checksum':'offline','rv_timestamp':'offline'}), \
-             patch('backend.post_payment.proxy_client',side_effect=lambda *a:httpx.Client(transport=httpx.MockTransport(followup_http))):
+             patch('backend.go_post_payment.execute',side_effect=go_followup_fixture):
             subscription.run_subscription(job)
         self.assertEqual(db.scalar('SELECT status FROM orders WHERE id=$1',order_id),'succeeded')
         self.assertEqual(len(sent),4)
@@ -716,7 +1011,7 @@ class BackendTests(unittest.TestCase):
         rows=trace.details(order_id)
         kinds={e['diagnostics']['request_kind'] for e in rows if e['http_status']==200}
         self.assertEqual(kinds,{'checkout_initialize','billing_update','payment_method_create','payment_confirm',
-                               'exit_probe','merchant_return','subscription_read'})
+                               'merchant_return','subscription_read'})
         self.assertEqual((rows[-1]['phase'],rows[-1]['state']),('complete','completed'))
         self.assertNotIn('4242424242424242',json.dumps(rows,default=str))
 
@@ -772,6 +1067,47 @@ class BackendTests(unittest.TestCase):
                 'payment':db.one('SELECT paid_at,payment_last4,payment_amount,payment_currency,checkout_url_enc,checkout_session_id,card_enc FROM subscription_runs WHERE order_id=$1',order_id),
                 'proxy':db.one('SELECT * FROM order_proxy_sessions WHERE order_id=$1',order_id),
                 'status':db.scalar('SELECT status FROM orders WHERE id=$1',order_id)}
+
+    def test_go_followup_isolated_and_charge_unchanged(self):
+        from backend import go_post_payment as gp,post_payment as pp
+        order_id,owner=self.paid_followup_order()
+        db.execute("UPDATE subscription_runs SET subscription_flow='gener_direct_pay' WHERE order_id=$1",order_id)
+        before=self.paid_snapshot(order_id,owner)
+        def complete(cp,save):
+            self.assertEqual(cp['executor'],gp.EXECUTOR)
+            self.assertEqual(cp['proxy_endpoint'],'http://proxy.example.test:8080')
+            cp['credentials']['access_token']='go-fresh-token'
+            cp.update(activation='active',renewal='off')
+            save('completed')
+        with patch.object(gp,'execute',side_effect=complete) as worker,patch.object(pp,'proxy_client',side_effect=AssertionError('Python HTTP must not run')):
+            self.assertEqual(gp.finish_payment(order_id,plan='pro5x')['state'],'completed')
+            worker.assert_called_once()
+            self.assertEqual(pp.resume(order_id)['state'],'completed')
+            worker.assert_called_once()
+        cp=json.loads(decrypt(db.scalar('SELECT checkpoint_enc FROM subscription_followups WHERE order_id=$1',order_id)))
+        self.assertEqual(cp['executor'],gp.EXECUTOR)
+        self.assertEqual(cp['credentials']['access_token'],'go-fresh-token')
+        self.assertEqual(db.one('SELECT activation,renewal FROM orders WHERE id=$1',order_id),{'activation':'active','renewal':'disabled'})
+        self.assertEqual(self.paid_snapshot(order_id,owner),before)
+
+    def test_go_followup_failure_does_not_fallback_or_repay(self):
+        from backend import go_post_payment as gp,post_payment as pp
+        order_id,owner=self.paid_followup_order()
+        db.execute("UPDATE subscription_runs SET subscription_flow='gener_direct_pay' WHERE order_id=$1",order_id)
+        before=self.paid_snapshot(order_id,owner)
+        with patch.object(gp,'execute',side_effect=pp.FollowupError('http_403')),patch.object(pp,'proxy_client') as legacy:
+            self.assertEqual(gp.finish_payment(order_id,plan='pro5x'),{'state':'review','warning_code':'http_403'})
+            legacy.assert_not_called()
+        self.assertEqual(self.paid_snapshot(order_id,owner),before)
+        other,_=self.paid_followup_order()
+        db.execute("UPDATE subscription_runs SET subscription_flow='cslive_direct_pay' WHERE order_id=$1",other)
+        with patch.object(gp,'execute') as worker:
+            self.assertEqual(gp.finish_payment(other,plan='pro5x')['warning_code'],'checkpoint_mismatch')
+            worker.assert_not_called()
+        unpaid,_,_=self.trace_order()
+        with patch.object(gp,'execute') as worker:
+            self.assertEqual(gp.finish_payment(unpaid,plan='pro5x')['warning_code'],'payment_evidence_missing')
+            worker.assert_not_called()
 
     def test_27_post_payment_refresh_failure_recovery_and_charge_invariants(self):
         from backend import post_payment as pp,payment_trace as trace
@@ -837,24 +1173,66 @@ class BackendTests(unittest.TestCase):
             finally:release.set()
             self.assertEqual(first.result(timeout=10)['state'],'completed')
 
-    def test_29_followup_uses_exact_order_proxy_and_freezes_on_ip_change(self):
+    def test_followup_real_context_and_redacted_retry_evidence_persist(self):
+        from backend import post_payment as pp,payment_trace as trace
+        from backend.order_http_context import OrderHTTPContext
+        order_id,owner=self.paid_followup_order(keep=True)
+        before=self.paid_snapshot(order_id,owner)
+        context=OrderHTTPContext({'session_token':'secret-session-fixture'})
+        context.prepare('POST','https://chatgpt.com/backend-api/payments/checkout',{'User-Agent':'Fixture client/1.0'})
+        context.absorb('POST','https://chatgpt.com/backend-api/payments/checkout',httpx.Headers({'set-cookie':'actual-context=cookie-private; Path=/; Secure'}))
+        reads=[]
+        def respond(request):
+            self.assertEqual(request.headers['user-agent'],'Fixture client/1.0')
+            self.assertIn('actual-context=cookie-private',request.headers['cookie'])
+            if request.url.path=='/checkout/verify':return httpx.Response(200)
+            reads.append(True)
+            return httpx.Response(503,json={'error':{'code':'temporarily_unavailable','message':'Retry later cookie-private secret-session-fixture'}},headers={'cf-ray':'1234567890abcdef-SJC'})
+        with patch.object(pp,'proxy_client',side_effect=lambda *a:httpx.Client(transport=httpx.MockTransport(respond))):
+            result=pp.finish_payment(order_id,plan='pro5x',request_context=context.snapshot())
+        self.assertEqual(result['warning_code'],'http_503');self.assertEqual(len(reads),3)
+        events=trace.details(order_id)
+        failures=[e for e in events if e['http_status']==503]
+        self.assertEqual([e['diagnostics']['request_attempt'] for e in failures],[1,2,3])
+        self.assertTrue(all(e['diagnostics']['response_error_code']=='temporarily_unavailable' for e in failures))
+        waits=[e['diagnostics']['retry_wait_ms'] for e in events if e['state']=='waiting' and e['code']=='request_retry_wait']
+        self.assertEqual(waits,[500,1000])
+        encoded=json.dumps(events,default=str)
+        self.assertNotIn('cookie-private',encoded);self.assertNotIn('secret-session-fixture',encoded)
+        encrypted=db.scalar('SELECT checkpoint_enc FROM subscription_followups WHERE order_id=$1',order_id)
+        self.assertNotIn('cookie-private',encrypted)
+        cp=json.loads(decrypt(encrypted))
+        self.assertTrue(any(c['value']=='cookie-private' for c in cp['request_context']['cookies']))
+        self.assertEqual(self.paid_snapshot(order_id,owner),before)
+
+    def test_29_followup_uses_saved_proxy_without_an_ip_baseline(self):
         from backend import post_payment as pp
-        order_id,owner=self.paid_followup_order()
+        order_id,owner=self.paid_followup_order(keep=True)
         other,_=self.paid_followup_order()
+        db.execute("UPDATE order_proxy_sessions SET expected_ip='' WHERE order_id=$1",order_id)
         db.execute("UPDATE order_proxy_sessions SET expected_ip='1.1.1.1' WHERE order_id=$1",other)
         before=self.paid_snapshot(order_id,owner);business=[]
         def respond(request):
-            if request.url.host!='ipinfo.io':business.append(request)
-            return httpx.Response(200,json={'ip':'1.1.1.1'})
-        with patch.object(pp,'proxy_client',side_effect=lambda *a:httpx.Client(transport=httpx.MockTransport(respond))):
-            self.assertEqual(pp.finish_payment(order_id,plan='pro5x')['warning_code'],'proxy_ip_changed')
-        self.assertEqual(business,[])
+            self.assertEqual(request.url.host,'chatgpt.com')
+            business.append(request)
+            return httpx.Response(200,json={'plan_type':'standard','will_renew':True})
+        with patch.object(pp,'proxy_client',side_effect=lambda *a:httpx.Client(transport=httpx.MockTransport(respond))) as factory:
+            self.assertEqual(pp.finish_payment(order_id,plan='pro5x')['state'],'completed')
+            factory.assert_called_once_with('http://proxy.example.test:8080',60)
+        self.assertTrue(business)
         self.assertEqual(self.paid_snapshot(order_id,owner),before)
-        self.assertEqual(db.scalar('SELECT renewal FROM orders WHERE id=$1',order_id),'review')
-        db.execute('UPDATE order_proxy_sessions SET expires_at=$2 WHERE order_id=$1',order_id,now()-timedelta(seconds=1))
+
+    def test_29_changed_proxy_session_still_blocks_followup_recovery(self):
+        from backend import post_payment as pp
+        order_id,owner=self.paid_followup_order()
+        with patch.object(pp,'proxy_client',side_effect=httpx.ConnectError('fixture')):
+            self.assertEqual(pp.finish_payment(order_id,plan='pro5x')['state'],'review')
+        db.execute('UPDATE order_proxy_sessions SET endpoint_enc=$2 WHERE order_id=$1',order_id,encrypt('http://changed.example.test:8080'))
+        before=self.paid_snapshot(order_id,owner)
         with patch.object(pp,'proxy_client') as factory:
             self.assertEqual(pp.resume(order_id)['warning_code'],'proxy_session_changed')
             factory.assert_not_called()
+        self.assertEqual(self.paid_snapshot(order_id,owner),before)
 
     def test_30_followup_storage_failures_cannot_change_payment_or_funds(self):
         from backend import post_payment as pp

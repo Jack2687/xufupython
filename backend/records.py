@@ -15,7 +15,7 @@ ANN="SELECT id,title,body,tone FROM announcements WHERE published AND (starts_at
 
 def _order_history(id, technical=False):
     events=db.all('SELECT id,stage,message,created_at FROM order_events WHERE order_id=$1 ORDER BY id',id)
-    labels={'queued':'排队受理','processing':'开始办理','network_check':'检查代理出口',
+    labels={'network_retry':'等待网络重试','checkout_reused':'复用原结账链接','payment_review':'付款结果待核实','queued':'排队受理','processing':'开始办理','network_check':'检查代理出口',
             'network_verified':'记录代理出口','checkout':'生成结账链接','checkout_done':'结账链接已生成',
             'awaiting_payment':'等待用户付款','payment':'开始付款','confirming':'提交付款确认',
             'approving':'商户批准','failed':'办理失败','payment_succeeded':'付款成功',
@@ -56,8 +56,9 @@ def _saved_checkout_links(id, run, checkout):
 @public_router.get('/public')
 def public():
     cfg=config('payment')
-    connected=cfg.get('enabled') is True and cfg.get('subscription_flow')=='gener_direct_pay'
-    return {'site':config('site'),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort'),'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected and 'link' in order_workflows(),'payment_connected':connected and 'subscription' in order_workflows(),'default_country':config('scheduler')['default_country'],'tiers':config('tiers')}
+    flow=cfg.get('subscription_flow') or ''
+    connected=cfg.get('enabled') is True and flow in ('gener_direct_pay','cslive_direct_pay')
+    return {'site':config('site'),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort'),'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected,'payment_connected':connected,'subscription_flow':flow if connected else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers')}
 
 
 @router.get('/overview')
@@ -140,7 +141,7 @@ def catalog(request:Request):
     for p in products: p['member_fee']=fee_for(m,p['fee'])
     countries=[{'code':code,'name':name,'currency':currency} for code,name,currency in [('PH','菲律宾','PHP'),('US','美国','USD'),('JP','日本','JPY'),('SG','新加坡','SGD'),('GB','英国','GBP'),('EG','埃及','EGP'),('TR','土耳其','TRY')]]
     cfg=config('payment')
-    return {'items':products,'membership':m,'unit':'cent_R','countries':countries,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow')=='gener_direct_pay' and 'subscription' in order_workflows()}
+    return {'items':products,'membership':m,'unit':'cent_R','countries':countries,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow')=='gener_direct_pay'}
 
 
 @admin_router.get('/overview')
@@ -148,7 +149,8 @@ def admin_overview():
     stats=db.one("SELECT (SELECT count(*) FROM users WHERE role='member') AS customers,(SELECT COALESCE(sum(balance),0) FROM users WHERE role='member') AS balance,(SELECT COALESCE(sum(frozen),0) FROM users WHERE role='member') AS frozen,(SELECT count(*) FROM orders) AS orders,(SELECT count(*) FROM topups WHERE status='pending') AS pending_topups,(SELECT count(*) FROM risk_events WHERE NOT resolved) AS risks,(SELECT count(*) FROM resources WHERE enabled) AS resources,(SELECT count(*) FROM orders WHERE status IN ('queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS active_orders")
     scheduler=dict(config('scheduler'),worker_mode=worker_mode())
     scheduler['paused']=scheduler['paused'] or worker_mode()=='off'
-    return {'stats':stats,'orders':db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 8'),'risks':db.all('SELECT * FROM risk_events ORDER BY id DESC LIMIT 5'),'scheduler':scheduler,'payment_connected':config('payment').get('enabled') is True and 'subscription' in order_workflows()}
+    cfg=config('payment')
+    return {'stats':stats,'orders':db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 8'),'risks':db.all('SELECT * FROM risk_events ORDER BY id DESC LIMIT 5'),'scheduler':scheduler,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow')=='gener_direct_pay'}
 
 
 @admin_router.get('/orders')

@@ -2,7 +2,6 @@
 import {computed,onUnmounted,ref} from 'vue'
 import {CreditCard,ShieldCheck,RefreshCw} from 'lucide-vue-next'
 import {api,cash,date,notify,type Row} from '../lib'
-import PaymentAction from './PaymentAction.vue'
 const props=defineProps<{order:Row;payment?:Row;checkout?:Row;admin?:boolean}>()
 const emit=defineEmits<{refresh:[]}>()
 const closing=ref(false),closeReason=ref(''),closeAccepted=ref(false)
@@ -23,7 +22,6 @@ async function check(){await run(async()=>{await api(`${props.admin?'/admin':''}
 <div class="panel-heading"><h3><CreditCard :size="19"/>站内付款</h3><span v-if="payment?.state" class="badge" :class="payment.state">{{payment.error_code==='admin_closed'?'人工关闭':states[payment.state]||'处理中'}}</span></div>
 <div class="alert danger" v-if="error" role="alert">{{error}}</div>
 <p v-if="payment?.message" role="status">{{payment.message}}</p>
-<PaymentAction v-if="admin&&['cslive','cslive_enhanced'].includes(order.subscription_flow)&&!payment?.automatic_running&&order.workflow==='subscription'&&['action_required','checking'].includes(payment?.state)" :key="order.id" :order-id="order.id" :can-start="!!payment?.can_check||payment?.state==='checking'" @refresh="emit('refresh')"/>
 <div v-if="canClose" class="manual-close"><button v-if="!closing" type="button" class="btn secondary" @click="closing=true">人工关闭订单并释放服务费</button><div v-else class="manual-close-confirm"><p><b>停止本站后续办理，并将 {{cash(order.fee)}} R 冻结服务费退回客户可用余额。</b></p><p>已经发往银行的付款不会因此撤销，原交易仍可能完成扣款；关闭后不会自动核实、续办或取消自动续费，请另行核对原交易。</p><label>关闭原因<textarea v-model="closeReason" required minlength="2" maxlength="300" placeholder="填写业务关闭原因，不要填写密钥、卡号或验证码"/></label><label class="checkbox-label"><input type="checkbox" v-model="closeAccepted" required/>我确认停止办理并释放冻结服务费，已了解此操作不退款或撤销银行卡付款。</label><div class="actions"><button type="button" class="btn primary" :disabled="busy||!closeAccepted||closeReason.trim().length<2" @click="closeOrder">确认关闭并释放</button><button type="button" class="btn secondary" :disabled="busy" @click="closing=false">返回</button></div></div></div>
 <div v-if="payment?.state" class="payment-summary"><span>付款卡尾号 <b>{{payment.last4||'—'}}</b></span><span>含税订阅金额 <b>{{amount}}</b></span><span>服务费 <b>{{cash(order.fee)}} R</b> · {{({held:'已冻结',charged:'已结算',released:'已解冻'} as Row)[payment.fee_state]}}</span></div>
 <p v-if="payment?.charged_amount!=null" class="small muted">已核实实收：{{payment.charged_amount/(payment.charged_currency.toUpperCase()==='JPY'?1:100)}} {{payment.charged_currency.toUpperCase()}}</p><p v-if="order.activation==='review'&&payment?.state==='succeeded'" class="callout">付款已确认，订阅生效尚待核实。请联系运营处理，无需再次付款。</p><form v-if="canPrepare" @submit.prevent="prepare" autocomplete="off">

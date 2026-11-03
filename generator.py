@@ -17,7 +17,6 @@ from backend import payment_trace as trace
 
 CHECKOUT_URL = "https://chatgpt.com/backend-api/payments/checkout"
 STRIPE_INIT_TMPL = "https://api.stripe.com/v1/payment_pages/{cs}/init"
-IPINFO_URL = "https://ipinfo.io/json"
 PK_FALLBACK = (
     "pk_live_51HOrSwC6h1nxGoI3lTAgRjYVrz4dU3fVOabyCcKR3pbEJguCVAlqCxdxCUvoRh1XWwRacViovU3kLKvpkjh7IqkW00iXQsjo3n"
 )
@@ -29,53 +28,6 @@ DEFAULT_PROXY = {
     "password": "rqtjsety",
     "type": "socks5",
 }
-
-COUNTRY_CURRENCY = {
-    "US": "USD",
-    "PH": "PHP",
-    "JP": "JPY",
-    "GB": "GBP",
-    "EG": "EGP",
-    "ID": "IDR",
-    "IN": "INR",
-    "BR": "BRL",
-    "AU": "AUD",
-    "CA": "CAD",
-    "NZ": "NZD",
-    "SG": "SGD",
-    "HK": "HKD",
-    "KR": "KRW",
-    "TW": "TWD",
-    "TH": "THB",
-    "VN": "VND",
-    "MY": "MYR",
-    "MX": "MXN",
-    "DE": "EUR",
-    "FR": "EUR",
-    "IT": "EUR",
-    "ES": "EUR",
-    "NL": "EUR",
-    "BE": "EUR",
-    "AT": "EUR",
-    "PT": "EUR",
-    "IE": "EUR",
-    "FI": "EUR",
-    "GR": "EUR",
-}
-
-
-def currency_for_country(country: str) -> str:
-    return COUNTRY_CURRENCY.get((country or "").strip().upper(), "USD")
-
-
-def align_billing_to_exit(country: str, currency: str, exit_country: str) -> tuple[str, str]:
-    """账单国家必须和请求出口国一致，否则 ChatGPT 会 400。"""
-    user_country = (country or "").strip().upper()
-    user_currency = (currency or "").strip().upper()
-    exit_cc = (exit_country or "").strip().upper()
-    if not exit_cc:
-        return user_country or "PH", user_currency or "PHP"
-    return exit_cc, currency_for_country(exit_cc)
 
 # 关键：Web UA 对 Pro 强制 custom（伪长链会转圈）；
 # ChatGPT iOS UA 会返回真正 hosted_checkout_session + pay.openai.com。
@@ -207,6 +159,10 @@ def curl_request(
     timeout: int = 60,
 ) -> tuple[int, str]:
     """用 curl 走 SOCKS5 或 HTTP 代理发请求。"""
+    from backend.order_http_context import current, response_headers
+    context = current(url)
+    if context is not None:
+        headers = context.prepare(method, url, headers)
     curl = _find_curl()
     proxy = normalize_proxy(
         proxy_host=proxy_host,
@@ -233,7 +189,13 @@ def curl_request(
         cmd.extend(["-H", f"{k}: {v}"])
 
     tmp_path = None
+    header_path = None
     try:
+        if context is not None:
+            tmp_headers = tempfile.NamedTemporaryFile(delete=False, suffix='.headers')
+            tmp_headers.close()
+            header_path = Path(tmp_headers.name)
+            cmd.extend(['--dump-header', str(header_path)])
         if json_body is not None:
             cmd.extend(["-H", "Content-Type: application/json"])
             tmp = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".json")
@@ -256,88 +218,14 @@ def curl_request(
         if marker not in out:
             raise RuntimeError(f"curl 输出异常: {out[:300]}")
         body, status_s = out.rsplit(marker, 1)
+        if context is not None and header_path is not None:
+            context.absorb(method, url, response_headers(header_path.read_text(encoding='iso-8859-1')))
         return int(status_s.strip()), body
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
-
-
-@trace.direct_probe
-def check_ip_direct() -> dict[str, Any]:
-    """不走代理，看本机出口（仅用于对照）。"""
-    curl = _find_curl()
-    proc = subprocess.run(
-        [curl, "-sS", "--max-time", "20", IPINFO_URL],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if proc.returncode != 0:
-        return {"error": (proc.stderr or proc.stdout or "")[:200]}
-    try:
-        data = json.loads(proc.stdout or "{}")
-    except Exception:  # noqa: BLE001
-        return {"error": "本机 ipinfo 解析失败", "raw": (proc.stdout or "")[:200]}
-    return {
-        "ip": data.get("ip"),
-        "country": data.get("country"),
-        "city": data.get("city"),
-        "org": data.get("org"),
-    }
-
-
-def check_ip_via_proxy(
-    *,
-    proxy_host: str,
-    proxy_port: str | int,
-    proxy_username: str = "",
-    proxy_password: str = "",
-    proxy_type: str = "socks5",
-    proxy_url: str = "",
-    retries: int = 8,
-    require_country: str | None = "PH",
-    on_log: LogFn = None,
-) -> dict[str, Any]:
-    def log(msg: str) -> None:
-        if on_log:
-            on_log(msg)
-
-    last: dict[str, Any] = {}
-    for i in range(1, max(1, retries) + 1):
-        status, body = curl_request(
-            "GET",
-            IPINFO_URL,
-            proxy_host=proxy_host,
-            proxy_port=proxy_port,
-            proxy_username=proxy_username,
-            proxy_password=proxy_password,
-            proxy_type=proxy_type,
-            proxy_url=proxy_url,
-            headers={"Accept": "application/json"},
-            timeout=40,
-        )
-        if status >= 400:
-            raise RuntimeError(f"ipinfo HTTP {status}: {body[:200]}")
-        data = json.loads(body)
-        last = {
-            "ip": data.get("ip"),
-            "country": data.get("country"),
-            "region": data.get("region"),
-            "city": data.get("city"),
-            "org": data.get("org"),
-            "raw": data,
-            "attempt": i,
-        }
-        cc = str(last.get("country") or "").upper()
-        log(
-            f"[代理出口 #{i}] IP={last.get('ip')} country={cc} "
-            f"city={last.get('city')} org={last.get('org')}"
-        )
-        if not require_country or cc == require_country.upper():
-            return last
-        log(f"出口不是 {require_country}，重试换节点…")
-    return last
+        if header_path:
+            header_path.unlink(missing_ok=True)
 
 
 def normalize_access_token(raw: str) -> str:
@@ -639,7 +527,6 @@ def generate_pro_long_link(
     proxy_url: str = "",
     country: str = "PH",
     currency: str = "PHP",
-    require_ph: bool = True,
     link_mode: str = "long",
     plan: str = "pro",
     workspace_name: str = "work",
@@ -721,52 +608,9 @@ def generate_pro_long_link(
         "proxy_type": proxy["type"],
         "proxy_url": proxy["url"] if proxy["type"] == "http" else "",
     }
-    log("对照：检测本机直连 IP（不走代理）…")
-    direct = check_ip_direct()
-    if "error" in direct:
-        log(f"本机直连检测失败: {direct['error']}")
-    else:
-        log(
-            f"[本机直连] IP={direct.get('ip')} country={direct.get('country')} "
-            f"city={direct.get('city')} org={direct.get('org')}"
-        )
-
-    log("检测代理出口 IP（DNS 也走代理，可多次重试换节点）…")
-    ipinfo = check_ip_via_proxy(
-        **proxy_kw,
-        retries=10 if require_ph else 1,
-        require_country="PH" if require_ph else None,
-        on_log=on_log,
-    )
-
-    if require_ph and str(ipinfo.get("country") or "").upper() != "PH":
-        raise RuntimeError(
-            f"代理出口仍不是 PH（最后一次: {ipinfo.get('country')} / {ipinfo.get('ip')}）。"
-            "这不是本机 IP；是代理池把你分到了其他国家节点。"
-            "请在 1024proxy 后台确认 region-PH，或稍后重试。"
-        )
-
-    if (
-        proxy["type"] != "http"
-        and direct.get("ip")
-        and ipinfo.get("ip")
-        and direct.get("ip") == ipinfo.get("ip")
-    ):
-        raise RuntimeError(
-            "代理出口 IP 与本机直连 IP 相同，说明代理未生效。请检查主机/端口/账号密码。"
-        )
-    if proxy["type"] == "http" and direct.get("ip") and ipinfo.get("ip") and direct.get("ip") == ipinfo.get("ip"):
-        log("本机直连与 HTTP 代理出口相同，多半系统已走 7890，继续生成。")
-
-    exit_cc = str(ipinfo.get("country") or "").upper()
-    aligned_country, aligned_currency = align_billing_to_exit(country, currency, exit_cc)
-    if aligned_country != (country or "").strip().upper() or aligned_currency != (currency or "").strip().upper():
-        log(f"账单国家按出口对齐: {country}/{currency} → {aligned_country}/{aligned_currency}")
-    country, currency = aligned_country, aligned_currency
-
+    country = (country or "PH").strip().upper()
+    currency = (currency or "PHP").strip().upper()
     common = {
-        "ipinfo": {k: ipinfo.get(k) for k in ("ip", "country", "region", "city", "org")},
-        "directIp": direct,
         "billingCountry": country,
         "billingCurrency": currency,
     }
@@ -941,11 +785,7 @@ def build_proxy_url(
 
 
 def make_session(*_a: Any, **_k: Any) -> Any:
-    raise RuntimeError("已改用 curl 通道，请使用 check_ip_via_proxy / generate_pro_long_link")
-
-
-def check_ip(*_a: Any, **_k: Any) -> Any:
-    raise RuntimeError("请使用 check_ip_via_proxy")
+    raise RuntimeError("已改用 curl 通道，请使用 generate_pro_long_link")
 
 
 if __name__ == "__main__":

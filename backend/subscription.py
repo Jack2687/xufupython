@@ -10,10 +10,10 @@ from fastapi import APIRouter, Depends, Request
 from psycopg2.errors import UniqueViolation
 
 from . import db, payment_trace as trace
+from . import subscription_retry
 from .common import *
 from .membership import fee_for, membership_for
 from .runtime import order_workflows, queue_message
-from .proxies import proxy_client
 from .payment_transport import payment_session
 from .renewals import RenewalSession, ProviderError, inspect as inspect_session, credentials as extract_credentials
 from .prolong.stripe_checksum import build_runtime_checksums
@@ -141,31 +141,11 @@ def _acquire_order_proxy(order_id: str, country: str, duration_sec: int) -> str:
         return endpoint
 
 
-def _check_exit_ip(proxy_url: str) -> str:
-    """Probe ipinfo.io via proxy and return the exit IP. Raise on failure."""
-    with trace.request('exit_probe') as diagnostic:
-        with proxy_client(proxy_url,20) as c:
-            r = c.get('https://ipinfo.io/json', headers={'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0'})
-            diagnostic.response(r.status_code, r.headers)
-            if r.status_code == 200:
-                import ipaddress
-                ip = str(ipaddress.ip_address(r.json().get('ip', '')))
-                if ip:
-                    return ip
-        raise RuntimeError('proxy_ip_check_failed')
-
-
-def _verify_exit_ip(proxy_url: str, expected_ip: str):
-    """Check exit IP matches baseline. Raise on mismatch, expiry, or failure."""
-    if not expected_ip:
-        raise RuntimeError('proxy_ip_missing')
-    # Also check proxy session not expired
-    row = db.one("SELECT expires_at FROM order_proxy_sessions WHERE endpoint_enc!='' ORDER BY created_at DESC LIMIT 1")
+def _check_proxy_session_lifetime(order_id: str):
+    """Check only the saved session expiry; never query its public exit IP."""
+    row = db.one('SELECT expires_at FROM order_proxy_sessions WHERE order_id=$1', order_id)
     if row and row['expires_at'] <= now():
         raise RuntimeError('proxy_session_expired')
-    current_ip = _check_exit_ip(proxy_url)
-    if current_ip != expected_ip:
-        raise RuntimeError(f'proxy_ip_changed:{expected_ip}->{current_ip}')
 
 
 def _pick_billing(q) -> dict:
@@ -303,17 +283,17 @@ async def create_order(request: Request):
                 user['id'], fee, 'freeze:' + order_id, order_id
             )
             q.execute(
-                "INSERT INTO subscription_runs(order_id,user_id,credentials_enc,credentials_expires_at,card_enc,workspace_name,premium_seats,billing_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+                "INSERT INTO subscription_runs(order_id,user_id,credentials_enc,credentials_expires_at,card_enc,workspace_name,premium_seats,billing_snapshot,subscription_flow) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
                 order_id, user['id'], encrypt(json.dumps(c)), expiry,
-                encrypt(json.dumps(card)), workspace_name, premium_seats, billing_address
+                encrypt(json.dumps(card)), workspace_name, premium_seats, billing_address, FLOW
             )
             q.execute("INSERT INTO order_events(order_id,stage,message) VALUES($1,'queued','订单已受理，等待分配资源。')", order_id)
             trace.record('funds', 'completed', 'hold', order_id=order_id, q=q)
         else:
             q.execute(
-                "INSERT INTO subscription_runs(order_id,user_id,credentials_enc,credentials_expires_at,card_enc,workspace_name,premium_seats,billing_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+                "INSERT INTO subscription_runs(order_id,user_id,credentials_enc,credentials_expires_at,card_enc,workspace_name,premium_seats,billing_snapshot,subscription_flow) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
                 order_id, user['id'], encrypt(json.dumps(c)), expiry,
-                encrypt(json.dumps({})), workspace_name, premium_seats, billing_address
+                encrypt(json.dumps({})), workspace_name, premium_seats, billing_address, FLOW
             )
             q.execute("INSERT INTO order_events(order_id,stage,message) VALUES($1,'queued','结账链接请求已受理，等待生成。')", order_id)
 
@@ -321,10 +301,11 @@ async def create_order(request: Request):
 
 
 def claim_subscription():
+    # The setting selects new orders; queued orders keep their admission-time flow.
     cfg = config('payment')
     sched = config('scheduler')
     workflows = order_workflows()
-    if not workflows or sched.get('paused') or cfg.get('enabled') is not True or cfg.get('subscription_flow') != FLOW:
+    if not workflows or sched.get('paused') or cfg.get('enabled') is not True:
         return None
     with db.transaction() as q:
         q.execute('SELECT pg_advisory_xact_lock(1886005)')
@@ -334,12 +315,14 @@ def claim_subscription():
         row = q.one(
             "SELECT o.id,o.user_id,o.product_id,o.product_name,o.email,o.country,o.seats,"
             "o.keep_renewal,o.fee,o.billing_address,o.price_snapshot,o.workflow,"
-            "s.credentials_enc,s.credentials_expires_at,s.card_enc,s.workspace_name,s.premium_seats,s.billing_snapshot,s.session_id"
+            "s.credentials_enc,s.credentials_expires_at,s.card_enc,s.workspace_name,s.premium_seats,s.billing_snapshot,s.session_id,s.subscription_flow,"
+            "s.network_retry_count,s.checkout_checkpoint_enc"
             " FROM orders o JOIN subscription_runs s ON s.order_id=o.id"
-            " WHERE o.status='queued' AND o.workflow=ANY($2::text[])"
+            " WHERE o.status='queued' AND o.workflow=ANY($2::text[]) AND s.subscription_flow=$3"
+            " AND s.network_retry_at<=now() AND s.payment_submit_started_at IS NULL AND s.paid_at IS NULL"
             " AND (SELECT count(*) FROM orders x WHERE x.user_id=o.user_id AND x.status='processing' AND x.workflow IN ('subscription','link'))<$1"
             " ORDER BY o.created_at LIMIT 1 FOR UPDATE OF o SKIP LOCKED",
-            cfg['per_user_parallel'], list(workflows)
+            cfg['per_user_parallel'], list(workflows), FLOW
         )
         if not row:
             return None
@@ -412,6 +395,8 @@ def _succeed_order(order_id: str, user_id: str, fee: int, last4: str, charged_am
 @trace.order_run
 def run_subscription(job: dict):
     order_id = job['id']
+    if not subscription_retry.can_start(order_id):
+        return
     user_id = job['user_id']
     fee = job['fee']
     country = job['country']
@@ -431,38 +416,41 @@ def run_subscription(job: dict):
         # 1. Acquire session-bound proxy by order country (matches xupay order_proxy.go)
         proxy_url = _acquire_order_proxy(order_id, country, 600)
 
-        # Record baseline exit IP and verify before every critical step
-        _add_event(order_id, 'network_check', '正在检查代理出口 IP…')
-        baseline_ip = _check_exit_ip(proxy_url)
-        db.execute("UPDATE order_proxy_sessions SET expected_ip=$2 WHERE order_id=$1", order_id, baseline_ip)
-        _add_event(order_id, 'network_verified', f'出口 IP 已记录：{baseline_ip}')
-
-        _add_event(order_id, 'checkout', '正在生成付款长链…')
+        cached = subscription_retry.load_checkout(job, FLOW)
+        if cached:
+            _add_event(order_id, 'checkout_reused', '沿用本单已生成的结账链接，从付款阶段重试。')
+        else:
+            _add_event(order_id, 'checkout', '正在生成付款长链…')
 
         # 2. Generate checkout link via generator.py
         import sys, os as _os
         sys.path.insert(0, str(db.ROOT))
         from generator import generate_pro_long_link, normalize_plan
+        from .order_http_context import OrderHTTPContext
+        platform_context = OrderHTTPContext(creds, cached.get('request_context') if cached else None)
 
         product_id = job['product_id']
         plan = normalize_plan(product_id)
         currency = CURRENCY.get(country, 'USD')
 
-        link_result = generate_pro_long_link(
-            json.dumps({'accessToken': creds['access_token'], 'account': {'id': creds['account_id']}}),
-            proxy_url=proxy_url,
-            country=country,
-            currency=currency,
-            require_ph=(country == 'PH'),
-            link_mode='long',
-            plan=plan,
-            workspace_name=job.get('workspace_name', 'work'),
-            seat_quantity=job['seats'],
-            premium_seat_quantity=job.get('premium_seats', 1),
-            price_interval='month',
-            # Generator text may contain credentials or complete checkout URLs.
-            on_log=lambda msg: None,
-        )
+        if cached:
+            link_result = cached['result']
+        else:
+            with platform_context.bind():
+                link_result = generate_pro_long_link(
+                    json.dumps({'accessToken': creds['access_token'], 'account': {'id': creds['account_id']}}),
+                    proxy_url=proxy_url,
+                    country=country,
+                    currency=currency,
+                    link_mode='long',
+                    plan=plan,
+                    workspace_name=job.get('workspace_name', 'work'),
+                    seat_quantity=job['seats'],
+                    premium_seat_quantity=job.get('premium_seats', 1),
+                    price_interval='month',
+                    # Generator text may contain credentials or complete checkout URLs.
+                    on_log=lambda msg: None,
+                )
 
         require(link_result.get('ok'), f"提链失败: {link_result.get('error','unknown')}")
         require(link_result.get('payable') is not False, '提链结果不可付款，请更换账号或套餐')
@@ -476,11 +464,9 @@ def run_subscription(job: dict):
             _add_event(order_id, 'country_aligned', f'账单国家/币种已对齐出口：{actual_country}/{actual_currency}')
             db.execute("UPDATE orders SET country=$2,updated_at=now() WHERE id=$1", order_id, actual_country)
 
-        db.execute(
-            "UPDATE subscription_runs SET checkout_url_enc=$2,checkout_session_id=$3 WHERE order_id=$1",
-            order_id, encrypt(hosted_url), cs_id
-        )
-        _add_event(order_id, 'checkout_done', f'长链已生成，cs={cs_id[:24]}…')
+        if not cached:
+            subscription_retry.save_checkout(order_id, FLOW, link_result, platform_context.snapshot())
+            _add_event(order_id, 'checkout_done', f'长链已生成，cs={cs_id[:24]}…')
 
         # link workflow ends here — mark awaiting_payment and return checkout URL
         if workflow == 'link':
@@ -511,8 +497,7 @@ def run_subscription(job: dict):
 
         import uuid as _uuid
         client_session_id = str(_uuid.uuid4())
-        # Verify exit IP before card submission
-        _verify_exit_ip(proxy_url, baseline_ip)
+        _check_proxy_session_lifetime(order_id)
 
         # 3d. Create payment method
         build_consts = build_runtime_checksums.__wrapped__ if hasattr(build_runtime_checksums, '__wrapped__') else None
@@ -548,9 +533,8 @@ def run_subscription(job: dict):
             'js_checksum': computed['js_checksum'],
             'rv_timestamp': computed['rv_timestamp'],
         }
+        _check_proxy_session_lifetime(order_id)
 
-        # Verify exit IP before confirm submission
-        _verify_exit_ip(proxy_url, baseline_ip)
 
         confirm_form = build_confirm_form(
             cs=cs_id,
@@ -566,6 +550,7 @@ def run_subscription(job: dict):
             runtime=runtime,
         )
         _add_event(order_id, 'confirming', '正在提交付款确认…')
+        subscription_retry.mark_payment_submission(order_id)
         confirm_resp = stripe.confirm(cs_id, confirm_form)
 
         # 3f. Classify confirm result
@@ -680,8 +665,9 @@ def run_subscription(job: dict):
         _succeed_order(order_id, user_id, fee, last4, actual_charged, currency_from_stripe)
         # 5. Post-charge follow-up is isolated from the payment failure handler.
         try:
-            from .post_payment import finish_payment
+            from .go_post_payment import finish_payment
             finish_payment(order_id, plan=plan, proxy_url=proxy_url,
+                           request_context=platform_context.snapshot(),
                            responses=(locals().get('pd'), confirm_resp, init_resp, link_result))
         except Exception as pe:
             # Even import/log/database failures after the charge must not fail or refund payment.
@@ -695,6 +681,8 @@ def run_subscription(job: dict):
                 log.warning('[%s] post-payment review marker unavailable', order_id)
 
     except ProviderError as e:
+        if subscription_retry.handle_failure(order_id, e):
+            return
         msg = str(e)
         if msg in ('invalid_session', 'account_mismatch'):
             _fail_order(order_id, user_id, fee, '账号授权失效，办理未完成。', trace.error_code(e))
@@ -702,6 +690,8 @@ def run_subscription(job: dict):
             code = trace.error_code(e)
             _fail_order(order_id, user_id, fee, trace.CODES[code], code)
     except Exception as e:
+        if subscription_retry.handle_failure(order_id, e):
+            return
         code = trace.error_code(e)
         log.error('[%s] subscription error: %s', order_id, code)
         _fail_order(order_id, user_id, fee, trace.CODES[code], code)

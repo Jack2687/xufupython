@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import httpx
 
@@ -172,10 +172,7 @@ class PostPaymentTests(unittest.TestCase):
         cp = checkpoint(); requests = []
         def respond(request):
             requests.append(request)
-            if request.url.host == 'ipinfo.io':
-                self.assertNotIn('authorization', request.headers)
-                self.assertNotIn('cookie', request.headers)
-                return httpx.Response(200, json={'ip': '8.8.4.4'})
+            self.assertEqual(request.url.host, 'chatgpt.com')
             self.assertIn('session-fixture', request.headers.get('cookie', ''))
             if request.url.path == '/api/auth/session':
                 self.assertNotIn('authorization', request.headers)
@@ -188,25 +185,29 @@ class PostPaymentTests(unittest.TestCase):
             return httpx.Response(200, json={})
         with httpx.Client(transport=httpx.MockTransport(respond)) as client:
             p = Platform(client, cp); p.refresh(); p.cancel()
-        self.assertEqual([r.url.host for r in requests], ['ipinfo.io', 'chatgpt.com', 'ipinfo.io'] * 2)
+        self.assertEqual([r.url.host for r in requests], ['chatgpt.com'] * 2)
         self.assertEqual(cp['credentials']['cookies']['__Secure-next-auth.session-token'], 'rotated')
 
-    def test_ip_mismatch_and_expiry_prevent_business_requests(self):
+    def test_missing_ip_does_not_block_but_session_expiry_still_does(self):
         for expired in (False, True):
-            cp = checkpoint(); business = []
+            cp = checkpoint(); cp.pop('expected_ip'); business = []
             if expired: cp['proxy_expires_at'] = (now() - timedelta(seconds=1)).isoformat()
             def respond(request):
-                if request.url.host != 'ipinfo.io': business.append(request)
-                return httpx.Response(200, json={'ip': '1.1.1.1'})
+                self.assertEqual(request.url.host, 'chatgpt.com')
+                business.append(request)
+                return httpx.Response(200, json={})
             with httpx.Client(transport=httpx.MockTransport(respond)) as client:
-                with self.assertRaisesRegex(FollowupError, 'proxy_session_expired' if expired else 'proxy_ip_changed'):
+                if expired:
+                    with self.assertRaisesRegex(FollowupError, 'proxy_session_expired'):
+                        Platform(client, cp).cancel()
+                else:
                     Platform(client, cp).cancel()
-            self.assertEqual(business, [])
+            self.assertEqual(len(business), 0 if expired else 1)
 
-    def test_ip_change_after_cancel_is_not_retried(self):
+    def test_session_expiry_after_cancel_is_not_retried(self):
         flow, platform, _, _ = self.flow([('activation', ACTIVE), ('refresh', None), ('renewal', ACTIVE),
-                                         ('cancel', FollowupError('proxy_ip_changed'))])
-        with self.assertRaisesRegex(FollowupError, 'proxy_ip_changed'): flow.finish()
+                                         ('cancel', FollowupError('proxy_session_expired'))])
+        with self.assertRaisesRegex(FollowupError, 'proxy_session_expired'): flow.finish()
         self.assertEqual(platform.calls[-1], 'cancel')
 
     def test_http_status_precedes_html_json_failure(self):
@@ -226,6 +227,119 @@ class PostPaymentTests(unittest.TestCase):
         flow.save = broken_save
         with self.assertRaises(OSError): flow.finish()
         self.assertNotIn('cancel', platform.calls)
+
+    def test_get_transient_failures_retry_three_times_with_package_delays(self):
+        for status in (408, 429, 500, 502, 503, 504, None):
+            calls, pauses = [], []
+            def respond(request):
+                calls.append(request)
+                if len(calls) < 3:
+                    if status is None: raise httpx.ConnectError('network fixture')
+                    return httpx.Response(status, json={'error': {'code': 'unavailable'}})
+                return httpx.Response(200, json=ACTIVE)
+            with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+                self.assertEqual(Platform(client, checkpoint(), pause=pauses.append).subscriptions(), ACTIVE)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(pauses, [.5, 1])
+
+    def test_get_retry_exhaustion_and_non_retry_statuses(self):
+        for status, expected in [(503, 3), (400, 1), (401, 1), (403, 1), (404, 1), (302, 1)]:
+            calls, pauses = [], []
+            def respond(request):
+                calls.append(request)
+                return httpx.Response(status, text='refused')
+            with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+                with self.assertRaisesRegex(FollowupError, 'http_' + str(status)):
+                    Platform(client, checkpoint(), pause=pauses.append).subscriptions()
+            self.assertEqual(len(calls), expected)
+            self.assertEqual(pauses, [.5, 1] if expected == 3 else [])
+
+    def test_post_transport_never_replays_cancel(self):
+        for status in (503, None):
+            calls, pauses = [], []
+            def respond(request):
+                calls.append(request)
+                if status is None: raise httpx.ReadTimeout('response lost')
+                return httpx.Response(status, json={})
+            with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+                with self.assertRaises(FollowupError):
+                    Platform(client, checkpoint(), pause=pauses.append).cancel()
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(pauses, [])
+
+    def test_expiry_during_retry_wait_prevents_next_request(self):
+        cp, calls = checkpoint(), []
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(503, json={})
+        def pause(seconds): cp['proxy_expires_at'] = (now() - timedelta(seconds=1)).isoformat()
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            with self.assertRaisesRegex(FollowupError, 'proxy_session_expired'):
+                Platform(client, cp, pause=pause).subscriptions()
+        self.assertEqual(len(calls), 1)
+
+    def test_403_evidence_is_redacted_and_no_refresh_or_cancel(self):
+        from backend import payment_trace as trace
+        cp = checkpoint(); events, calls = [], []
+        cp['proxy_endpoint'] = 'http://proxy-user:proxy-password@proxy.example.test:8080'
+        def respond(request):
+            calls.append(request.url.path)
+            return httpx.Response(403, json={'error': {'code': 'access_denied', 'type': 'permission_error',
+                'message': 'Denied original-token session-fixture proxy-password account-fixture cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA== '
+                           'user@example.com 4242 4242 4242 4242 https://example.test/?token=hidden'}},
+                headers={'cf-ray': '1234567890abcdef-SJC', 'x-request-id': '11111111-2222-3333-4444-555555555555'})
+        with patch.object(trace, 'record', side_effect=lambda *a, **kw: events.append((a, deepcopy(kw)))), trace.scope('fixture', 1):
+            with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+                with self.assertRaisesRegex(FollowupError, 'http_403'):
+                    Followup(cp, Platform(client, cp), lambda phase: None).finish()
+        self.assertEqual(calls, ['/backend-api/subscriptions'])
+        failed = next(kw for a, kw in events if len(a) > 1 and a[1] == 'failed')
+        evidence = failed['diagnostics']; encoded = json.dumps(evidence)
+        for value in ('original-token', 'session-fixture', 'proxy-password', 'account-fixture', 'user@example.com', '4242', 'token=hidden', 'cHJveHktdXNlcjpwcm94eS1wYXNzd29yZA=='):
+            self.assertNotIn(value, encoded)
+        self.assertEqual(evidence['response_error_code'], 'access_denied')
+        self.assertEqual(evidence['cf_ray'], '1234567890abcdef-SJC')
+        self.assertEqual(evidence['response_content_type'], 'application/json')
+
+    def test_actual_context_survives_refresh_failure_and_resume(self):
+        from backend.order_http_context import OrderHTTPContext
+        context = OrderHTTPContext(checkpoint()['credentials'])
+        context.prepare('POST', 'https://chatgpt.com/backend-api/payments/checkout',
+                        {'User-Agent': 'Fixture client/1.0', 'Accept-Language': 'en-US'})
+        context.absorb('POST', 'https://chatgpt.com/backend-api/payments/checkout',
+                       httpx.Headers([('set-cookie', 'checkout-context=actual-cookie; Path=/; Secure')]))
+        cp = checkpoint(); cp['request_context'] = context.snapshot()
+        def first(request):
+            self.assertEqual(request.headers['user-agent'], 'Fixture client/1.0')
+            self.assertIn('checkout-context=actual-cookie', request.headers['cookie'])
+            return httpx.Response(503, json={}, headers={'set-cookie': 'checkout-context=rotated-cookie; Path=/; Secure'})
+        with httpx.Client(transport=httpx.MockTransport(first)) as client:
+            p = Platform(client, cp, pause=lambda _: None)
+            # Only the first request sees the original value; retry is tested elsewhere.
+            with self.assertRaisesRegex(FollowupError, 'http_503'): p.cancel()
+        recovered = deepcopy(cp)
+        def second(request):
+            self.assertIn('checkout-context=rotated-cookie', request.headers['cookie'])
+            self.assertEqual(request.headers['accept-language'], 'en-US')
+            self.assertNotIn('authorization', request.headers)
+            return httpx.Response(200, json={'accessToken': 'fresh-token'},
+                                  headers={'set-cookie': '__Secure-next-auth.session-token=new-session; Path=/; Secure'})
+        with httpx.Client(transport=httpx.MockTransport(second)) as client:
+            Platform(client, recovered).refresh()
+        self.assertEqual(recovered['credentials']['access_token'], 'fresh-token')
+        self.assertEqual(recovered['credentials']['cookies']['__Secure-next-auth.session-token'], 'new-session')
+
+    def test_deleted_context_cookie_is_not_resurrected_on_resume(self):
+        cp = checkpoint()
+        def respond(request):
+            return httpx.Response(200, json=ACTIVE, headers=[
+                ('set-cookie', '__Secure-next-auth.session-token=; Max-Age=0; Path=/; Secure'),
+                ('set-cookie', '__Secure-platform.session-token=; Max-Age=0; Path=/; Secure')])
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            Platform(client, cp).subscriptions()
+        with httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=ACTIVE))) as client:
+            Platform(client, cp)
+            self.assertEqual(list(client.cookies.jar), [])
 
 
 if __name__ == '__main__':

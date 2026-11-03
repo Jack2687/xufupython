@@ -31,9 +31,12 @@ def validate_config(key, v):
     if key=='scheduler':
         require(v['default_country'] in COUNTRIES and v['link_mode']=='long' and v['engine'] in ('not_connected','checkout'),'调度配置无效')
     if key=='payment':
-        # These values remain inert UI configuration; this project has no subscription engine.
+        # Retired flow identifiers must not be accepted from older clients.
         for name in ('subscription_flow','checkout_flow'):
             if name in v: require(isinstance(v[name],str) and length(v[name])<=80,'流程配置无效')
+        if 'subscription_flow' in v:
+            require(v['subscription_flow'] in ('','gener_direct_pay','cslive_direct_pay'),
+                    '此订阅流程不受支持，请重新选择流程')
         if 'checkout_type' in v: require(v['checkout_type'] in ('hosted','oaics'),'结账链接类型无效')
         if 'checkout_types' in v:
             require(isinstance(v['checkout_types'],dict) and set(v['checkout_types'])==set(DEFAULTS['payment']['checkout_types']) and all(t in ('hosted','oaics') for t in v['checkout_types'].values()),'请为每个套餐选择链接类型')

@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-import ipaddress
 import json
 import logging
 import re
 import time
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 import httpx
 
@@ -15,6 +14,8 @@ from . import db, payment_trace as trace
 from .common import decrypt, encrypt, now
 from .proxies import proxy_client
 from .renewals import COOKIE_NAME
+from .order_http_context import OrderHTTPContext
+from .http_evidence import BODY_LIMIT
 
 log = logging.getLogger('xufu.post_payment')
 BASE = 'https://chatgpt.com'
@@ -32,6 +33,7 @@ HOSTED_TYPES = dict(go='go', plus='basic', pro5x='standard', pro20x='premium',
                     promax='promax', team='team', team5x='team')
 RETRY_CANCEL = {'network_error', 'http_408', 'http_429', 'http_500',
                 'http_502', 'http_503', 'http_504'}
+RETRY_GET_STATUS = {408, 429, 500, 502, 503, 504}
 
 
 class FollowupError(Exception):
@@ -132,42 +134,39 @@ def subscription_not_found(method, path, status, headers, raw):
 
 
 class Platform:
-    """All requests share the order's saved proxy; check its original IP each time."""
-    def __init__(self, client, cp):
+    """All requests share the order's saved proxy and retain its lifetime checks."""
+    def __init__(self, client, cp, pause=time.sleep):
         self.client, self.cp = client, cp
-        c = cp['credentials']
-        cookies = dict(c.get('cookies') or {})
-        if not cookies and c.get('session_token'):
-            cookies = {k: c['session_token'] for k in (
-                '__Secure-next-auth.session-token', '__Secure-platform.session-token')}
-        for key, value in cookies.items():
-            if COOKIE_NAME.fullmatch(key):
-                client.cookies.set(key, value, domain='chatgpt.com', path='/')
+        self.pause = pause
+        self.context = OrderHTTPContext(cp['credentials'], cp.get('request_context'))
+        client.cookies.update(self.context.cookies)
+
+    def _snapshot_context(self):
+        self.context.cookies = self.client.cookies
+        self.cp['request_context'] = self.context.snapshot()
+        cookies = {c.name: c.value for c in self.client.cookies.jar
+                   if c.domain.lstrip('.') == 'chatgpt.com' and COOKIE_NAME.fullmatch(c.name) and not c.is_expired()}
+        for name in list(cookies):
+            if re.search(r'\.\d+$', name) and name.rsplit('.', 1)[0] in cookies:
+                del cookies[name]
+        if cookies:
+            self.cp['credentials'].update(cookies=cookies, session_token='')
+
+    def _diagnostic_secrets(self):
+        c = self.cp['credentials']
+        values = [c.get('access_token'), c.get('session_token'), c.get('email'), self.cp.get('account_id')]
+        values.extend((c.get('cookies') or {}).values())
+        values.extend(cookie.value for cookie in self.client.cookies.jar)
+        proxy = urlsplit(self.cp.get('proxy_endpoint') or '')
+        values.extend(unquote(value) for value in (proxy.username, proxy.password) if value)
+        if proxy.username and proxy.password:
+            values.append(unquote(proxy.username) + ':' + unquote(proxy.password))
+        values.append(self.cp.get('proxy_endpoint'))
+        return values
 
     def _check_lifetime(self):
         if datetime.fromisoformat(self.cp['proxy_expires_at']) <= now():
             raise FollowupError('proxy_session_expired')
-
-    @trace.phase('network')
-    def check_exit(self):
-        self._check_lifetime()
-        try:
-            with trace.request('exit_probe') as observation:
-                with self.client.stream('GET', 'https://ipinfo.io/json', follow_redirects=False) as response:
-                    observation.response(response.status_code, response.headers)
-                    raw = self._read(response, 4096)
-                    if response.status_code != 200:
-                        raise FollowupError('proxy_ip_check_failed')
-                    current = ipaddress.ip_address(json.loads(raw)['ip'])
-            expected = ipaddress.ip_address(self.cp['expected_ip'])
-        except FollowupError:
-            raise
-        except Exception:
-            raise FollowupError('proxy_ip_check_failed') from None
-        self._check_lifetime()
-        if current != expected:
-            raise FollowupError('proxy_ip_changed')
-        trace.record('network', 'completed', 'proxy_ip_matched')
 
     @staticmethod
     def _read(response, limit=262144):
@@ -178,10 +177,21 @@ class Platform:
                 raise FollowupError('invalid_response')
         return bytes(raw)
 
+    @staticmethod
+    def _read_failure(response):
+        raw = bytearray()
+        for chunk in response.iter_bytes():
+            raw.extend(chunk[:BODY_LIMIT + 1 - len(raw)])
+            if len(raw) > BODY_LIMIT:
+                break
+        return bytes(raw)
+
     def headers(self, path, renewal=False):
         h = {'Authorization': 'Bearer ' + self.cp['credentials']['access_token'],
              'Chatgpt-Account-Id': self.cp['account_id'], 'Accept': 'application/json',
              'Origin': BASE, 'Referer': BASE + '/', 'User-Agent': 'Mozilla/5.0'}
+        h = dict(httpx.Headers(h).items())
+        h.update(self.context.headers)
         target = urlsplit(path).path
         if renewal:
             target = target.replace('/backend-api', '/api/v1')
@@ -190,39 +200,67 @@ class Platform:
         return h
 
     def request(self, method, path, kind, *, renewal=False, payload=None, refresh=False, landing=False):
-        self.check_exit()
+        self._check_lifetime()
         headers = self.headers('' if landing else path, renewal)
         if refresh:
-            headers.pop('Authorization')
+            headers.pop('authorization', None)
         url = path if landing else BASE + path
-        try:
-            with trace.request(kind) as observation:
-                kwargs = {'headers': headers, 'follow_redirects': False}
-                if payload is not None:
-                    kwargs['json'] = payload
-                with self.client.stream(method, url, **kwargs) as response:
-                    observation.response(response.status_code, response.headers)
-                    if landing:
-                        data = {}  # cs-live uses the callback as a visit, never proof of activation.
-                    else:
-                        raw = self._read(response)
-                        if subscription_not_found(method, path, response.status_code, response.headers, raw):
-                            observation.code = 'subscription_absent'
-                            raise FollowupError('subscription_not_found')
-                        if not 200 <= response.status_code < 300:
-                            raise FollowupError('http_' + str(response.status_code))
-                        try:
-                            data = json.loads(raw)
-                        except (ValueError, UnicodeError):
-                            raise FollowupError('invalid_response') from None
-                        if not isinstance(data, dict):
-                            raise FollowupError('invalid_response')
-        except httpx.HTTPError:
-            raise FollowupError('network_error') from None
-        finally:
-            # A change after a write means its outcome is uncertain; never retry on a new IP.
-            self.check_exit()
-        return data
+        attempts = 3 if method == 'GET' else 1
+        for attempt in range(attempts):
+            self._check_lifetime()
+            retry = False
+            try:
+                with trace.request(kind) as observation:
+                    kwargs = {'headers': headers, 'follow_redirects': False}
+                    if payload is not None:
+                        kwargs['json'] = payload
+                    try:
+                        with self.client.stream(method, url, **kwargs) as response:
+                            observation.response(response.status_code, response.headers)
+                            old_secrets = self._diagnostic_secrets()
+                            # httpx absorbs the actual Set-Cookie on this same client.
+                            self._snapshot_context()
+                            raw = (self._read_failure(response) if response.status_code >= 300
+                                   else b'' if landing else self._read(response))
+                            observation.response(response.status_code, response.headers,
+                                raw.decode('utf-8', errors='replace'),
+                                secrets=old_secrets + self._diagnostic_secrets(), failure_details=True)
+                            retry = attempt + 1 < attempts and response.status_code in RETRY_GET_STATUS
+                            observation.diagnostics['retrying'] = retry
+                            if subscription_not_found(method, path, response.status_code, response.headers, raw):
+                                observation.code = 'subscription_absent'
+                                raise FollowupError('subscription_not_found')
+                            if not 200 <= response.status_code < 300:
+                                raise FollowupError('http_' + str(response.status_code))
+                            if landing:
+                                return {}  # A successful visit is not proof of activation.
+                            try:
+                                data = json.loads(raw)
+                            except (ValueError, UnicodeError):
+                                raise FollowupError('invalid_response') from None
+                            if not isinstance(data, dict):
+                                raise FollowupError('invalid_response')
+                            return data
+                    except httpx.HTTPError as exc:
+                        retry = attempt + 1 < attempts
+                        observation.diagnostics['retrying'] = retry
+                        reason = trace.error_code(exc)
+                        if reason in {'timeout', 'proxy_connect', 'dns', 'tls', 'connection'}:
+                            observation.diagnostics['network_reason'] = reason
+                        raise FollowupError('network_error') from None
+            except FollowupError:
+                if not retry:
+                    raise
+            finally:
+                self._check_lifetime()
+            wait = 0.5 * (2 ** attempt)
+            started = time.monotonic()
+            trace.record(trace.REQUEST_PHASES[kind], 'waiting', 'request_retry_wait',
+                         diagnostics={'request_kind': kind, 'retry_wait_ms': round(wait * 1000)})
+            self.pause(wait)
+            trace.record(trace.REQUEST_PHASES[kind], 'completed', 'request_retry_wait',
+                         diagnostics={'request_kind': kind, 'retry_wait_ms': round(wait * 1000),
+                                      'retry_wait_elapsed_ms': trace.round_ms(started)})
 
     def visit_return(self, url):
         self.request('GET', validate_return_url(url, self.cp), 'merchant_return', landing=True)
@@ -387,24 +425,26 @@ def _save(order_id, cp, phase='', warning=''):
     cp.update(phase=saved['phase'], warning_code=warning)
 
 
-def _run(order_id, *, plan=None, responses=(), proxy_url=None):
+def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=None, executor='python'):
     # Cross-process exclusion also covers the recovery CLI. No network while holding an order row lock.
     with db.transaction() as lock:
         if not lock.scalar('SELECT pg_try_advisory_xact_lock(1886011,hashtext($1))', order_id):
             return {'state': 'busy', 'warning_code': 'followup_busy'}
-        row = db.one('SELECT o.status,o.workflow,o.keep_renewal,s.paid_at,s.checkout_session_id,s.credentials_enc,s.trace_round '
+        row = db.one('SELECT o.status,o.workflow,o.keep_renewal,s.paid_at,s.checkout_session_id,s.credentials_enc,s.trace_round,s.subscription_flow '
                      'FROM orders o JOIN subscription_runs s ON s.order_id=o.id WHERE o.id=$1', order_id)
         if not row or row['workflow'] != 'subscription' or row['status'] != 'succeeded' or not row['paid_at']:
             raise FollowupError('payment_evidence_missing')
+        if executor == 'go_cslive_v1' and row['subscription_flow'] != 'gener_direct_pay':
+            raise FollowupError('checkpoint_mismatch')
         saved = db.one('SELECT checkpoint_enc FROM subscription_followups WHERE order_id=$1', order_id)
         cp = json.loads(decrypt(saved['checkpoint_enc'])) if saved else None
         if cp and cp['phase'] == 'completed':
             return {'state': 'completed', 'warning_code': ''}
         if cp is None and plan is None:
             raise FollowupError('checkpoint_missing')
-        proxy = db.one('SELECT endpoint_enc,expected_ip,expires_at FROM order_proxy_sessions WHERE order_id=$1', order_id)
-        if not proxy or not proxy['expected_ip']:
-            raise FollowupError('proxy_ip_missing')
+        proxy = db.one('SELECT endpoint_enc,expires_at FROM order_proxy_sessions WHERE order_id=$1', order_id)
+        if not proxy or not proxy['endpoint_enc']:
+            raise FollowupError('proxy_session_missing')
         endpoint = decrypt(proxy['endpoint_enc'])
         if proxy_url is not None and proxy_url != endpoint:
             raise FollowupError('proxy_session_changed')
@@ -414,21 +454,29 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None):
                   'checkout_id': row['checkout_session_id'], 'account_id': creds['account_id'],
                   'entity': 'openai_llc', 'cancel_requested': not row['keep_renewal'],
                   'activation': 'pending', 'renewal': 'unknown', 'credentials': creds,
-                  'proxy_endpoint': endpoint, 'expected_ip': proxy['expected_ip'],
+                  'proxy_endpoint': endpoint,
                   'proxy_expires_at': proxy['expires_at'].isoformat()}
+            if request_context is not None:
+                cp['request_context'] = OrderHTTPContext(snapshot=request_context).snapshot()
             cp['return_url'] = select_return_url(cp, responses)
+            cp['executor'] = executor
             _save(order_id, cp)
+        cp['executor'] = executor
         with trace.scope(order_id, row['trace_round']):
             try:
-                if (cp['proxy_endpoint'] != endpoint or cp['expected_ip'] != proxy['expected_ip']
+                if (cp['proxy_endpoint'] != endpoint
                         or cp['proxy_expires_at'] != proxy['expires_at'].isoformat()):
                     raise FollowupError('proxy_session_changed')
                 if proxy['expires_at'] <= now():
                     raise FollowupError('proxy_session_expired')
                 if cp['checkout_id'] != row['checkout_session_id']:
                     raise FollowupError('checkpoint_mismatch')
-                with proxy_client(endpoint, 60) as client:
-                    Followup(cp, Platform(client, cp), lambda phase: _save(order_id, cp, phase)).finish()
+                if executor == 'go_cslive_v1':
+                    from .go_post_payment import execute
+                    execute(cp, lambda phase: _save(order_id, cp, phase))
+                else:
+                    with proxy_client(endpoint, 60) as client:
+                        Followup(cp, Platform(client, cp), lambda phase: _save(order_id, cp, phase)).finish()
                 return {'state': 'completed', 'warning_code': ''}
             except Exception as exc:
                 if cp['phase'] == 'completed':
@@ -457,13 +505,14 @@ def record_unexpected_failure(order_id, exc):
     return {'state': 'review', 'warning_code': code}
 
 
-def finish_payment(order_id, *, plan, responses=(), proxy_url=None):
+def finish_payment(order_id, *, plan, responses=(), proxy_url=None, request_context=None):
     try:
-        return _run(order_id, plan=plan, responses=responses, proxy_url=proxy_url)
+        return _run(order_id, plan=plan, responses=responses, proxy_url=proxy_url, request_context=request_context)
     except Exception as exc:
         return record_unexpected_failure(order_id, exc)
 
 
 def resume(order_id):
     """Explicit recovery of an existing post-charge checkpoint; no historical replay."""
-    return _run(order_id)
+    flow = db.scalar('SELECT subscription_flow FROM subscription_runs WHERE order_id=$1', order_id)
+    return _run(order_id, executor='go_cslive_v1' if flow == 'gener_direct_pay' else 'python')

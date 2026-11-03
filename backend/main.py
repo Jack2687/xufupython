@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI,Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
-from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,admin_content,renewals,subscription
+from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,admin_content,renewals,subscription,subscription_cslive
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
@@ -38,10 +38,10 @@ def maintenance():
 
 def worker_loop(stop):
     executor=ThreadPoolExecutor(max_workers=22,thread_name_prefix='xufu-worker')
-    proxy_jobs=set();renewal_jobs=set();subscription_jobs=set();last_maintenance=0
+    proxy_jobs=set();renewal_jobs=set();subscription_jobs=set();cslive_jobs=set();last_maintenance=0
     try:
         while not stop.wait(1):
-            for group in (proxy_jobs,renewal_jobs,subscription_jobs):
+            for group in (proxy_jobs,renewal_jobs,subscription_jobs,cslive_jobs):
                 for future in list(group):
                     if future.done():
                         try:future.result()
@@ -50,25 +50,30 @@ def worker_loop(stop):
             try:
                 if time.monotonic()-last_maintenance>60:maintenance();last_maintenance=time.monotonic()
                 if len(proxy_jobs)<2:proxy_jobs.add(executor.submit(proxies.run_check))
-                if worker_mode()=='all' and len(renewal_jobs)<20:
-                    job=renewals.claim()
-                    if job:renewal_jobs.add(executor.submit(renewals.run_task,job))
-                if len(subscription_jobs)<4:
-                    job=subscription.claim_subscription()
-                    if job:subscription_jobs.add(executor.submit(subscription.run_subscription,job))
+                if worker_mode()=='all':
+                    if len(renewal_jobs)<20:
+                        job=renewals.claim()
+                        if job:renewal_jobs.add(executor.submit(renewals.run_task,job))
+                    if len(subscription_jobs)<4:
+                        job=subscription.claim_subscription()
+                        if job:subscription_jobs.add(executor.submit(subscription.run_subscription,job))
+                    if len(cslive_jobs)<4:
+                        job=subscription_cslive.claim_subscription()
+                        if job:cslive_jobs.add(executor.submit(subscription_cslive.run_subscription,job))
             except Exception as e:log.error('Worker scheduling failed (%s)',type(e).__name__)
     finally:executor.shutdown(wait=True,cancel_futures=True)
 
 
 @asynccontextmanager
 async def lifespan(app):
-    db.initialize();seed();stop=threading.Event();thread=None
-    if worker_mode()!='off':
-        thread=threading.Thread(target=worker_loop,args=(stop,),daemon=True,name='xufu-scheduler');thread.start()
-    yield
-    stop.set()
-    if thread:await asyncio.to_thread(thread.join,115)
-    db.close()
+    db.initialize();seed();stop=threading.Event()
+    thread=threading.Thread(target=worker_loop,args=(stop,),daemon=True,name='xufu-scheduler');thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        await asyncio.to_thread(thread.join,115)
+        db.close()
 
 
 app=FastAPI(title='XUFU Python API',version='1.0.0',docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
@@ -107,7 +112,7 @@ async def security(request:Request,call_next):
     return result
 
 
-for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription):app.include_router(module.router)
+for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive):app.include_router(module.router)
 for router in (records.public_router,records.router,records.admin_router):app.include_router(router)
 
 

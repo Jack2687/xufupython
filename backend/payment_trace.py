@@ -8,7 +8,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
-from . import db
+from . import db, http_evidence
 
 log = logging.getLogger('xufu.payment_trace')
 _current = ContextVar('payment_trace', default=None)
@@ -42,6 +42,7 @@ CODES = {
     'proxy_unavailable': '当前地区没有可用代理资源',
     'proxy_ip_matched': '当前出口与本单付款时保存的出口一致',
     'proxy_session_changed': '本单原代理会话记录已变化，已停止收尾',
+    'proxy_session_missing': '缺少本单已保存的代理会话',
     'invalid_return_url': '回跳地址不符合本单校验要求，未访问该地址',
     'session_token_required': '缺少刷新登录态所需的 Session Cookie',
     'session_expired': '刷新接口未返回有效登录态',
@@ -52,7 +53,16 @@ CODES = {
     'payment_evidence_missing': '本单缺少已付款凭据，未执行付款后流程',
     'unsupported_plan': '无法匹配本单订阅套餐',
     'network_error': '付款后请求网络异常',
+    'request_retry_wait': '查询遇到短暂故障，等待后重试',
+    'network_retry_scheduled': '网络故障，已按配置安排重试',
     'subscription_not_found': '订阅查询尚无结果，不能据此确认续费已关闭',
+    'go_followup_unavailable': 'Go 付款后程序未安装，请检查本地构建或部署镜像',
+    'go_followup_protocol_error': 'Go 付款后程序通信异常，已保存收尾进度',
+    'go_local_proxy_unsupported': '本机代理链暂不支持此代理协议，已停止收尾',
+    'deadline_exceeded': '本轮付款后处理达到时间上限',
+    'checkpoint_failed': '收尾进度保存失败，已停止后续操作',
+    'invalid_json_response': '上游未返回有效 JSON，请结合 HTTP 状态查看响应摘要',
+    'network_timeout': '付款后网络请求超时',
 }
 REQUEST_PHASES = {
     'exit_probe': 'network', 'direct_exit_probe': 'network', 'checkout_create': 'checkout', 'checkout_initialize': 'opening',
@@ -68,6 +78,7 @@ _DIAGNOSTIC_ENUMS = {
     'network_reason': {'timeout', 'proxy_connect', 'dns', 'tls', 'connection'},
     'response_kind': {'json', 'html', 'empty', 'other'},
     'email_source': {'system_billing', 'subscription_account'},
+    'network_stage': {'connection', 'request_write', 'response_headers', 'response_body'},
 }
 _dropped = 0
 
@@ -112,6 +123,19 @@ def _diagnostics(values):
             result[key] = value
         elif key == 'request_attempt' and type(value) is int and 1 <= value <= 10000:
             result[key] = value
+        elif key in {'retry_number', 'retry_limit'} and type(value) is int and 0 <= value <= 5:
+            result[key] = value
+        elif key == 'retry_delay_seconds' and type(value) is int and 5 <= value <= 3600:
+            result[key] = value
+        elif key == 'checkout_reused' and type(value) is bool:
+            result[key] = value
+        elif key in {'connection_ready_ms', 'request_write_ms', 'first_byte_ms',
+                     'response_wait_ms', 'network_stage_elapsed_ms'} and type(value) in (int, float) and 0 <= value <= 240000:
+            result[key] = round(value, 2)
+        else:
+            safe = http_evidence.filter_field(key, value)
+            if safe is not None and safe != '':
+                result[key] = safe
     return result
 
 
@@ -197,7 +221,7 @@ class RequestObservation:
         self.code = ''
         self.diagnostics = {'request_kind': kind}
 
-    def response(self, status, headers=None, body=None):
+    def response(self, status, headers=None, body=None, *, secrets=(), failure_details=False):
         self.status = status
         headers = {str(k).lower(): v for k, v in (headers or {}).items()}
         self.request_id = headers.get('request-id') or headers.get('x-request-id') or ''
@@ -210,6 +234,8 @@ class RequestObservation:
             except (ValueError, TypeError):
                 kind = 'empty' if not body.strip() else 'html' if body.lstrip().startswith('<') else 'other'
             self.diagnostics['response_kind'] = kind
+        if failure_details:
+            self.diagnostics.update(http_evidence.failure_evidence(status, headers, body, secrets))
 
 
 @contextmanager
@@ -269,17 +295,6 @@ def http_call(kind, call, *args, **kwargs):
         response = call(*args, **kwargs)
         observation.response(response.status_code, response.headers)
         return response
-
-
-def direct_probe(fn):
-    @wraps(fn)
-    def wrapped(*args, **kwargs):
-        with request('direct_exit_probe') as observation:
-            result = fn(*args, **kwargs)
-            if result.get('error'):
-                observation.code = error_code(RuntimeError(result['error']))
-            return result
-    return wrapped
 
 
 def details(order_id):

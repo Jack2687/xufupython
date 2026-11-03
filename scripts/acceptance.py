@@ -55,7 +55,7 @@ def run():
     assert changed==['frontend/src/components/ConfigEditor.vue'],changed
     flow_select=re.search(r'<select v-model="form.subscription_flow"[^>]*>(.*?)</select>',(ROOT/'frontend/src/components/ConfigEditor.vue').read_text(encoding='utf-8'))
     flow_options=re.findall(r'<option value="([^"]+)"',flow_select[1]) if flow_select else []
-    assert flow_options==['cslive','cslive_direct_pay']
+    assert [flow for flow in flow_options if flow]==['gener_direct_pay']
     report={'checked_at':now().isoformat(),'url':'http://127.0.0.1:18970','health':True,'admin_login':True,'only_admin_user':True,'empty_business_tables':empty_tables,'billing_profiles':len(billing['address_templates']),'proxies':len(resources),'billing_exact':True,'proxy_plaintext_exact':True,'proxy_ciphertext_independent':True,'new_proxy_checks_preserved':db.scalar('SELECT count(*) FROM proxy_checks'),'frontend_source_changes':changed,'served_assets_match_build':True,'flow_selection_options':flow_options,'live_payment_or_renewal_performed':False}
     (ROOT/'.local/acceptance.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(report,ensure_ascii=False,indent=2));db.close()

@@ -15,8 +15,8 @@ function elapsed(events:Row[]){
  const intervals=events.flatMap(e=>{const t=time(e.created_at);return t===null?[]:[[t-Math.max(0,Number(e.elapsed_ms)||0),t]]})
  return intervals.length?durationText(Math.max(...intervals.map(x=>x[1]))-Math.min(...intervals.map(x=>x[0]))):'未记录'
 }
-export const flowNames:Record<string,string>={legacy:'旧提链 → 旧浏览器付款',legacy_protocol:'旧提链 → 旧协议付款',cslive:'新提链 → 新流程付款',cslive_enhanced:'新流程增强版',cslive_browser:'新提链 → 旧浏览器付款',cslive_direct_pay:'新提链 → 直连 HTTP 付款'}
-export const paymentNames:Record<string,string>={legacy:'旧浏览器',legacy_protocol:'旧 HTTP 协议',cslive:'新流程',cslive_enhanced:'新流程增强版',cslive_browser:'旧浏览器',cslive_direct_pay:'直连 HTTP'}
+export const flowNames:Record<string,string>={legacy:'旧提链 → 旧浏览器付款',legacy_protocol:'旧提链 → 旧协议付款'}
+export const paymentNames:Record<string,string>={legacy:'旧浏览器',legacy_protocol:'旧 HTTP 协议'}
 const paymentStates:Record<string,[State,string]>={preparing:['running','准备中'],quoted:['running','报价已就绪'],submitting:['running','付款处理中'],checking:['running','核实付款结果'],succeeded:['completed','付款成功'],failed:['failed','付款未完成'],cancelled:['skipped','已停止'],review:['review','付款结果待核实'],action_required:['review','等待官方验证']}
 const activationStates:Record<string,[State,string]>={active:['completed','订阅已生效'],pending:['waiting','等待生效核实'],review:['review','订阅生效待核实'],not_checked:['waiting','未单独记录核实结果']}
 const renewalStates:Record<string,[State,string]>={disabled:['completed','自动续费已关闭'],kept:['skipped','按要求保留自动续费'],review:['review','关闭续费待处理'],retrying:['running','正在重新处理续费'],pending:['waiting','等待处理'],not_started:['waiting','尚未开始']}
@@ -61,7 +61,7 @@ export function buildPaymentJourney(input:Input){
  const checkoutDone=currentLinks.length>0||c.ready===true
  if(checkoutDone)set('checkout',['completed','结账链接已生成'])
  else if(o.status==='queued')set('checkout',['waiting','等待办理资源'])
- fact('checkout','提链流程',o.checkout_flow==='legacy'?'旧提链':['cslive','cslive_enhanced'].includes(o.checkout_flow)?'新提链':'未记录')
+ fact('checkout','提链流程',o.checkout_flow==='legacy'?'旧提链':'未记录')
  fact('checkout','本单链接类型',linkType)
  fact('checkout','执行轮次',rounds?`${rounds} 轮`:'未记录')
  const quoted=currencyAmount(p.amount,p.currency),received=currencyAmount(p.charged_amount,p.charged_currency)
@@ -124,7 +124,7 @@ export function buildPaymentJourney(input:Input){
  const matched=network.some(e=>['exit_ip_matched','proxy_ip_matched'].includes(e.code))
  const ip=mismatch?'曾检测到出口变化':matched?'已记录出口一致':'未记录明确比对结果'
  const summary=[
-  {label:'本单办理组合',value:subscription?(flowNames[o.subscription_flow]||'未记录'):`${o.checkout_flow==='legacy'?'旧提链':['cslive','cslive_enhanced'].includes(o.checkout_flow)?'新提链':'提链'} · 仅生成链接`},
+  {label:'本单办理组合',value:subscription?(flowNames[o.subscription_flow]||'未记录'):`${o.checkout_flow==='legacy'?'旧提链':'提链'} · 仅生成链接`},
   {label:'目标套餐',value:o.product_name||'未记录'},
   {label:received!=='未记录'?'实收金额':'付款报价',value:received!=='未记录'?received:quoted},
   {label:'服务费',value:`${fee} · ${feeState[p.fee_state]||'未记录'}`},

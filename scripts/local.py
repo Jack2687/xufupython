@@ -69,6 +69,8 @@ def start():
     initialize()
     if port_open(18970):
         print('Application port 18970 already listening; no duplicate started.');return
+    from build_post_payment import build
+    build()
     with (LOCAL/'app.log').open('ab') as log:
         process=subprocess.Popen([sys.executable,str(ROOT/'scripts/serve.py')],cwd=ROOT,stdout=log,stderr=log,creationflags=FLAGS)
     (LOCAL/'app-process.json').write_text(json.dumps({'pid':process.pid,'script':str(ROOT/'scripts/serve.py'),'port':18970}),encoding='utf-8')

@@ -1,21 +1,23 @@
-"""Explicit background task availability, shared by admission and scheduling."""
-import os
+"""Admission and scheduling follow the admin payment toggle."""
+
+from . import db
 
 
 def worker_mode():
-    if os.getenv('APP_TEST_MODE') == '1':
+    try:
+        cfg = db.scalar("SELECT value FROM settings WHERE key='payment'", default={}) or {}
+    except Exception:
         return 'off'
-    mode = os.getenv('APP_WORKER_MODE', 'links')
-    return mode if mode in ('off', 'links', 'all') else 'off'
+    return 'all' if cfg.get('enabled') is True else 'off'
 
 
 def order_workflows():
-    return {'off': (), 'links': ('link',), 'all': ('link', 'subscription')}[worker_mode()]
+    return {'off': (), 'all': ('link', 'subscription')}[worker_mode()]
 
 
 def queue_message(workflow):
     if worker_mode() == 'off':
-        return '后台任务未启动，当前请求不会执行，请联系管理员。'
+        return '站内付款尚未开启，请在后台开启“开放站内付款”后再试。'
     if workflow not in order_workflows():
-        return '当前仅开放生成结账链接，自动付款尚未启用。'
+        return '当前工作流未启用，请联系管理员。'
     return ''

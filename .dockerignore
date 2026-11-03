@@ -1,6 +1,8 @@
 *
 !Dockerfile
 !requirements.txt
+!go-post-payment/
+!go-post-payment/**
 !generator.py
 !backend/
 !backend/**

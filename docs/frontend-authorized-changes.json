@@ -1,6 +1,7 @@
 {
   "reason": "2026-11-03：保留原流程配置授权；修复排队提示、账单国家/州及邮箱来源。按用户要求参考 xupay 接入真实技术日志，展示来源、HTTP 状态、耗时、执行轮次与请求诊断；历史记录不补造。自动付款保持关闭。",
   "source_files": [
+    "frontend/src/Customer.vue",
     "frontend/src/components/ConfigEditor.vue",
     "frontend/src/components/OrderBilling.vue",
     "frontend/src/components/PaymentTrace.vue",
@@ -9,10 +10,17 @@
     "frontend/tests/paymentJourney.test.mjs",
     "frontend/src/Admin.vue",
     "frontend/src/components/CheckoutLinks.vue",
-    "frontend/src/components/ApiDocs.vue"
+    "frontend/src/components/ApiDocs.vue",
+    "frontend/src/components/PaymentPanel.vue",
+    "frontend/src/components/PaymentAction.vue"
   ],
   "checkout_display": "2026-11-03：用户要求排查订阅办理监控中提链地址缺失。仅增加管理员已保存链接的只读投影和展示，不改变付款核心。当前快照不冒充完整分轮历史。",
   "post_payment_alignment": "2026-11-03：按用户要求对齐付款成功后的核实与关闭续费。监控区分付款成功和收尾完成，展示本单出口比对及续费查询；未修改付款前页面逻辑。",
   "generated_directory": "webui",
-  "public_api_docs": "2026-11-03：按当前 8 个 API 密钥接口整理对外文档，删除不存在的创建/付款核实接口、旧字段和内部说明。"
+  "public_api_docs": "2026-11-03：按当前 8 个 API 密钥接口整理对外文档，删除不存在的创建/付款核实接口、旧字段和内部说明。",
+  "removed_cslive_flows": "2026-11-03：按用户要求删除两个 cslive 选项及专属代码，保留 gener 流程代码；仅本地启动。",
+  "post_payment_http_evidence": "2026-11-03：按用户要求对齐付款后请求上下文、GET 故障重试与脱敏错误证据。监控显示错误摘要、网关编号、重试等待；回跳 200 明确标为访问付款回跳页。",
+  "cslive_customer_routing": "2026-11-03：用户已授权独立 cslive 提链流程，Customer.vue 按当前订阅流程选择新订单入口；此处补记已有授权差异，不修改前端源码。",
+  "subscription_network_retry": "2026-11-03：用户要求新增可配置网络重试次数，提链成功后复用原链接；付款配置展示次数与间隔说明，监控展示重试次数及链接复用。",
+  "gener_go_post_payment": "2026-11-03：只将 gener_direct_pay 的显示名追加 +Go付款成功后续，键值与另一条流程显示不变。付款确认成功后由独立 Go 程序收尾；不迁移旧订单。"
 }
