@@ -36,6 +36,7 @@ services:
       MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY; preserve it when migrating data}
       APP_WORKER_MODE: ${APP_WORKER_MODE:-all}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
       BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-admin}
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:?Set BOOTSTRAP_PASSWORD for an empty database}
       TZ: Asia/Shanghai

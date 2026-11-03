@@ -50,6 +50,26 @@ class BackendTests(unittest.TestCase):
 
     def setUp(self):db.execute('DELETE FROM rate_buckets')
 
+    def test_https_reverse_proxy_login_keeps_csrf_boundary(self):
+        from backend.request_origin import configured_origin
+        from backend import main
+        with patch.object(main, 'PUBLIC_ORIGIN', configured_origin('https://pay.example.test')):
+            client = TestClient(app, base_url='http://pay.example.test')
+            credentials = {'email': 'admin', 'password': 'admin'}
+            valid = {'Origin': 'https://pay.example.test', 'Sec-Fetch-Site': 'same-origin'}
+            self.ok(client.post('/api/auth/login', json=credentials, headers=valid))
+            self.assertEqual(self.ok(client.get('/api/me'))['role'], 'admin')
+            self.ok(client.get('/api/admin/users'))
+            for headers in [{'Origin': 'https://evil.example.test'},
+                            {'Origin': 'http://pay.example.test'},
+                            {'Origin': 'https://pay.example.test', 'Sec-Fetch-Site': 'cross-site'},
+                            {'Origin': 'null', 'X-Forwarded-Proto': 'https'}]:
+                response = client.post('/api/auth/login', json=credentials, headers=headers)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()['error'], '请求来源不受信任')
+            self.ok(client.post('/api/auth/logout', json={}, headers=valid))
+            self.assertEqual(client.get('/api/me').status_code, 401)
+
     def ok(self,response,status=200):
         self.assertEqual(response.status_code,status,response.text[:400]);return response.json()
 

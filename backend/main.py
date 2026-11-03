@@ -14,6 +14,9 @@ from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
+from .request_origin import configured_origin, origin_allowed
+
+PUBLIC_ORIGIN = configured_origin(os.getenv('PUBLIC_ORIGIN', ''))
 
 log=logging.getLogger('xufu')
 WEB=db.ROOT/'webui'
@@ -90,10 +93,7 @@ async def security(request:Request,call_next):
     try:
         if request.method not in ('GET','HEAD','OPTIONS'):
             require(request.headers.get('sec-fetch-site')!='cross-site','请求来源不受信任',403)
-            origin=request.headers.get('origin')
-            if origin:
-                u=urlsplit(origin)
-                require(u.scheme==request.url.scheme and u.netloc.lower()==request.url.netloc.lower(),'请求来源不受信任',403)
+            require(origin_allowed(request, PUBLIC_ORIGIN),'请求来源不受信任',403)
         size=request.headers.get('content-length')
         require(not size or size.isdigit() and int(size)<=1048576,'请求内容过大',413)
         if not request.url.path.startswith('/health/'):
