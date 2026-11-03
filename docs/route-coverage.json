@@ -1,0 +1,494 @@
+[
+  {
+    "method": "DELETE",
+    "path": "/api/admin/announcements/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/billing-profiles/{email}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/blocks/{ip}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/resources/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/keys/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/announcements",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/audit",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/billing-profiles",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/codes",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/finance",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/finance/export",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/membership",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/orders",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/orders/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/overview",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/products",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/proxy-checks/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/resources",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/risk",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/settings",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/topups",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/users",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/invites",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/keys",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/me",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/membership",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/openapi.json",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/orders",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/orders/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/overview",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/public",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/quote",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/renewals",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/renewals/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/catalog",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/membership",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/orders",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/orders/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/quote",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/wallet",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/wallet",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/admin/orders/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/admin/users/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/me",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/announcements",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/billing-profiles",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/billing-profiles/sample",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/blocks",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/codes",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/codes/batch",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/orders/{id}/close",
+    "status": "excluded",
+    "reason": "用户要求订阅办理、结账链接及关联执行后端留空"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/orders/{id}/payment/check",
+    "status": "excluded",
+    "reason": "用户要求订阅办理、结账链接及关联执行后端留空"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/resources",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/resources/{id}/checks",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/resources/{id}/global",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/resources/{id}/test",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/risk/{id}/resolve",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/topups/{id}/review",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/users",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/users/pricing",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/users/{id}/balance",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/login",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/logout",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/register",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/keys",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/orders",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/orders/{id}/cancel",
+    "status": "excluded",
+    "reason": "用户要求订阅办理、结账链接及关联执行后端留空"
+  },
+  {
+    "method": "POST",
+    "path": "/api/renewals",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/session/inspect",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/topups",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/topups/{id}/cancel",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/orders",
+    "status": "excluded",
+    "reason": "用户要求订阅办理、结账链接及关联执行后端留空"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/orders/{id}/cancel",
+    "status": "excluded",
+    "reason": "用户要求订阅办理、结账链接及关联执行后端留空"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/session/inspect",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/wallet/redeem",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/wallet/redeem",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/announcements/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/billing-profiles/{email}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/products/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/resources/{id}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/settings/{key}",
+    "status": "implemented",
+    "reason": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/users/{id}/membership",
+    "status": "implemented",
+    "reason": ""
+  }
+]

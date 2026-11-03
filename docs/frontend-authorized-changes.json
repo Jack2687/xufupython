@@ -1,0 +1,18 @@
+{
+  "reason": "2026-11-03：保留原流程配置授权；修复排队提示、账单国家/州及邮箱来源。按用户要求参考 xupay 接入真实技术日志，展示来源、HTTP 状态、耗时、执行轮次与请求诊断；历史记录不补造。自动付款保持关闭。",
+  "source_files": [
+    "frontend/src/components/ConfigEditor.vue",
+    "frontend/src/components/OrderBilling.vue",
+    "frontend/src/components/PaymentTrace.vue",
+    "frontend/src/components/PaymentTraceEvents.vue",
+    "frontend/src/paymentJourney.ts",
+    "frontend/tests/paymentJourney.test.mjs",
+    "frontend/src/Admin.vue",
+    "frontend/src/components/CheckoutLinks.vue",
+    "frontend/src/components/ApiDocs.vue"
+  ],
+  "checkout_display": "2026-11-03：用户要求排查订阅办理监控中提链地址缺失。仅增加管理员已保存链接的只读投影和展示，不改变付款核心。当前快照不冒充完整分轮历史。",
+  "post_payment_alignment": "2026-11-03：按用户要求对齐付款成功后的核实与关闭续费。监控区分付款成功和收尾完成，展示本单出口比对及续费查询；未修改付款前页面逻辑。",
+  "generated_directory": "webui",
+  "public_api_docs": "2026-11-03：按当前 8 个 API 密钥接口整理对外文档，删除不存在的创建/付款核实接口、旧字段和内部说明。"
+}

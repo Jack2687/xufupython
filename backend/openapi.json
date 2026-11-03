@@ -1,0 +1,1755 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "序付 API",
+    "version": "1.1.0",
+    "description": "查询账户、套餐、报价与订单，检查账号 Session，以及兑换余额。"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "当前站点"
+    }
+  ],
+  "paths": {
+    "/api/v1/wallet": {
+      "get": {
+        "operationId": "get_wallet",
+        "summary": "查询余额",
+        "description": "可用余额 = balance − frozen。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Wallet"
+                },
+                "example": {
+                  "balance": 10000,
+                  "frozen": 2000,
+                  "fee_override": null,
+                  "unit": "cent_R",
+                  "membership": {
+                    "current": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "automatic": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "next": null,
+                    "spent": 0,
+                    "remaining": 0,
+                    "progress": 100,
+                    "source": "automatic",
+                    "until": null,
+                    "fee_override": null,
+                    "tiers": [
+                      {
+                        "code": "L1",
+                        "name": "会员",
+                        "threshold": 0,
+                        "discount": 100,
+                        "description": ""
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/catalog": {
+      "get": {
+        "operationId": "get_catalog",
+        "summary": "查询套餐",
+        "description": "返回在售套餐、当前账户服务费和支持的订阅地区。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Product"
+                      }
+                    },
+                    "membership": {
+                      "$ref": "#/components/schemas/Membership"
+                    },
+                    "unit": {
+                      "type": "string",
+                      "description": "服务费单位：cent_R。"
+                    },
+                    "countries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "description": "地区代码。"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "地区名称。"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "description": "币种。"
+                          }
+                        }
+                      }
+                    },
+                    "payment_connected": {
+                      "type": "boolean",
+                      "description": "网页订阅办理是否可用。"
+                    }
+                  }
+                },
+                "example": {
+                  "items": [
+                    {
+                      "id": "pro5x",
+                      "name": "Pro 5x",
+                      "description": "",
+                      "fee": 10000,
+                      "member_fee": 10000,
+                      "tag": "",
+                      "features": []
+                    }
+                  ],
+                  "membership": {
+                    "current": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "automatic": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "next": null,
+                    "spent": 0,
+                    "remaining": 0,
+                    "progress": 100,
+                    "source": "automatic",
+                    "until": null,
+                    "fee_override": null,
+                    "tiers": [
+                      {
+                        "code": "L1",
+                        "name": "会员",
+                        "threshold": 0,
+                        "discount": 100,
+                        "description": ""
+                      }
+                    ]
+                  },
+                  "unit": "cent_R",
+                  "countries": [
+                    {
+                      "code": "US",
+                      "name": "美国",
+                      "currency": "USD"
+                    }
+                  ],
+                  "payment_connected": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quote": {
+      "get": {
+        "operationId": "get_quote",
+        "summary": "查询服务费报价",
+        "description": "按套餐与当前账户会员等级计算平台服务费；不创建订单。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fee": {
+                      "type": "integer",
+                      "description": "当前账户服务费，单位：分 R（100 分 R = 1 R）。",
+                      "minimum": 0
+                    },
+                    "standard": {
+                      "type": "integer",
+                      "description": "标准服务费，单位：分 R（100 分 R = 1 R）。",
+                      "minimum": 0
+                    },
+                    "membership": {
+                      "$ref": "#/components/schemas/Membership"
+                    }
+                  }
+                },
+                "example": {
+                  "fee": 10000,
+                  "standard": 10000,
+                  "membership": {
+                    "current": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "automatic": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "next": null,
+                    "spent": 0,
+                    "remaining": 0,
+                    "progress": 100,
+                    "source": "automatic",
+                    "until": null,
+                    "fee_override": null,
+                    "tiers": [
+                      {
+                        "code": "L1",
+                        "name": "会员",
+                        "threshold": 0,
+                        "discount": 100,
+                        "description": ""
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "query",
+            "required": true,
+            "description": "从套餐列表取得的编号。",
+            "schema": {
+              "type": "string"
+            },
+            "example": "pro5x"
+          }
+        ]
+      }
+    },
+    "/api/v1/membership": {
+      "get": {
+        "operationId": "get_membership",
+        "summary": "查询会员权益",
+        "description": "查询会员等级、套餐优惠及最近 100 条已结算订单的成长记录。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "membership": {
+                      "$ref": "#/components/schemas/Membership"
+                    },
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "套餐编号。"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "套餐名称。"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "套餐说明。"
+                          },
+                          "fee": {
+                            "type": "integer",
+                            "description": "标准服务费，单位：分 R（100 分 R = 1 R）。",
+                            "minimum": 0
+                          },
+                          "member_fee": {
+                            "type": "integer",
+                            "description": "当前账户服务费，单位：分 R（100 分 R = 1 R）。",
+                            "minimum": 0
+                          },
+                          "enabled": {
+                            "type": "boolean",
+                            "description": "是否在售。"
+                          },
+                          "saved": {
+                            "type": "integer",
+                            "description": "相对标准价节省金额，单位：分 R（100 分 R = 1 R）。",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "growth": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "订单编号。"
+                          },
+                          "product_name": {
+                            "type": "string",
+                            "description": "套餐名称。"
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "description": "更新时间。",
+                            "format": "date-time"
+                          },
+                          "spent": {
+                            "type": "integer",
+                            "description": "本单已结算服务费，单位：分 R（100 分 R = 1 R）。",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "unit": {
+                      "type": "string",
+                      "description": "服务费单位：cent_R。"
+                    },
+                    "basis": {
+                      "type": "string",
+                      "description": "成长依据。",
+                      "enum": [
+                        "settled_service_spend"
+                      ]
+                    }
+                  }
+                },
+                "example": {
+                  "membership": {
+                    "current": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "automatic": {
+                      "code": "L1",
+                      "name": "会员",
+                      "threshold": 0,
+                      "discount": 100,
+                      "description": ""
+                    },
+                    "next": null,
+                    "spent": 0,
+                    "remaining": 0,
+                    "progress": 100,
+                    "source": "automatic",
+                    "until": null,
+                    "fee_override": null,
+                    "tiers": [
+                      {
+                        "code": "L1",
+                        "name": "会员",
+                        "threshold": 0,
+                        "discount": 100,
+                        "description": ""
+                      }
+                    ]
+                  },
+                  "products": [],
+                  "growth": [],
+                  "unit": "cent_R",
+                  "basis": "settled_service_spend"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/session/inspect": {
+      "post": {
+        "operationId": "inspect_session",
+        "summary": "检查账号 Session",
+        "description": "只检查格式、账号信息和有效期，不代表订阅已生效。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                },
+                "example": {
+                  "email": "account@example.com",
+                  "account_id": "ACCOUNT_ID",
+                  "plan": "free",
+                  "expires_at": "2030-01-01T00:00:00Z",
+                  "status": "format_valid",
+                  "online_verified": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/Session"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "完整 Session 对象，或包含该对象的 JSON 字符串。"
+                  }
+                },
+                "required": [
+                  "session"
+                ]
+              },
+              "example": {
+                "session": {
+                  "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
+                  "user": {
+                    "email": "account@example.com"
+                  },
+                  "account": {
+                    "id": "ACCOUNT_ID",
+                    "planType": "free"
+                  },
+                  "expires": "2030-01-01T00:00:00Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wallet/redeem": {
+      "post": {
+        "operationId": "redeem_code",
+        "summary": "兑换余额",
+        "description": "每张兑换码只能使用一次。请求超时后先查询余额，不要自动反复兑换。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "兑换是否成功。"
+                    },
+                    "amount": {
+                      "type": "integer",
+                      "description": "本次入账金额，单位：分 R（100 分 R = 1 R）。",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "amount": 10000
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "兑换码。"
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              },
+              "example": {
+                "code": "YOUR_REDEEM_CODE"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "get": {
+        "operationId": "list_orders",
+        "summary": "查询订单列表",
+        "description": "仅返回当前账户最近 200 条订单；支持关键词和状态筛选。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Order"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "items": [
+                    {
+                      "id": "ORDER_ID",
+                      "product_id": "pro5x",
+                      "product_name": "Pro 5x",
+                      "email": "account@example.com",
+                      "country": "US",
+                      "seats": 1,
+                      "status": "succeeded",
+                      "fee": 10000,
+                      "source": "web",
+                      "workflow": "subscription",
+                      "keep_renewal": false,
+                      "activation": "active",
+                      "renewal": "disabled",
+                      "created_at": "2026-11-03T00:00:00Z",
+                      "updated_at": "2026-11-03T00:02:00Z",
+                      "price_snapshot": {
+                        "standard": 10000,
+                        "member_fee": 10000,
+                        "membership": "L1"
+                      },
+                      "payment": {
+                        "state": "succeeded",
+                        "last4": "4242",
+                        "amount": 100,
+                        "currency": "USD",
+                        "fee_state": "charged",
+                        "message": "付款成功，服务费已结算。"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "订单编号或订阅邮箱关键词。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "按订单状态筛选。",
+            "schema": {
+              "type": "string",
+              "description": "订单状态。",
+              "enum": [
+                "draft",
+                "queued",
+                "processing",
+                "awaiting_payment",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "review"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/orders/{id}": {
+      "get": {
+        "operationId": "get_order",
+        "summary": "查询订单详情",
+        "description": "读取订单、进度、结账地址和付款结果。付款成功后须分别检查订阅生效和自动续费状态。",
+        "security": [
+          {
+            "BearerKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetail"
+                },
+                "example": {
+                  "order": {
+                    "id": "ORDER_ID",
+                    "product_id": "pro5x",
+                    "product_name": "Pro 5x",
+                    "email": "account@example.com",
+                    "country": "US",
+                    "seats": 1,
+                    "status": "succeeded",
+                    "fee": 10000,
+                    "source": "web",
+                    "workflow": "subscription",
+                    "keep_renewal": false,
+                    "activation": "active",
+                    "renewal": "disabled",
+                    "created_at": "2026-11-03T00:00:00Z",
+                    "updated_at": "2026-11-03T00:02:00Z",
+                    "price_snapshot": {
+                      "standard": 10000,
+                      "member_fee": 10000,
+                      "membership": "L1"
+                    }
+                  },
+                  "events": [],
+                  "checkout": {},
+                  "payment": {
+                    "state": "succeeded",
+                    "last4": "4242",
+                    "amount": 100,
+                    "currency": "USD",
+                    "fee_state": "charged",
+                    "message": "付款成功，服务费已结算。",
+                    "charged_amount": 100,
+                    "charged_currency": "USD"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API 密钥无效或账户不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "记录不存在或不属于当前账户",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务暂时异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "本账户的订单编号。",
+            "schema": {
+              "type": "string"
+            },
+            "example": "ORDER_ID"
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "在网页开发接入中创建 API 密钥。"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "错误说明。"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Tier": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "等级代码。"
+          },
+          "name": {
+            "type": "string",
+            "description": "等级名称。"
+          },
+          "threshold": {
+            "type": "integer",
+            "description": "累计消费门槛，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "discount": {
+            "type": "integer",
+            "description": "计费百分比，95 表示按标准服务费的 95% 收取。"
+          },
+          "description": {
+            "type": "string",
+            "description": "等级说明。"
+          }
+        }
+      },
+      "Membership": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "automatic": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spent": {
+            "type": "integer",
+            "description": "已结算服务费累计消费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "remaining": {
+            "type": "integer",
+            "description": "距下一等级所需消费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "progress": {
+            "type": "integer",
+            "description": "升级进度百分比。"
+          },
+          "source": {
+            "type": "string",
+            "description": "等级来源。",
+            "enum": [
+              "automatic",
+              "manual"
+            ]
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "指定等级的到期时间。",
+            "format": "date-time"
+          },
+          "fee_override": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "账户专属服务费，单位分 R；null 表示使用等级折扣。"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tier"
+            }
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "账号的有效 accessToken。"
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string",
+                "description": "账号邮箱。",
+                "format": "email"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          },
+          "account": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "账号空间标识。"
+              },
+              "planType": {
+                "type": "string",
+                "description": "当前套餐类型。"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "expires": {
+            "type": "string",
+            "description": "Session 到期时间。",
+            "format": "date-time"
+          },
+          "sessionToken": {
+            "type": "string",
+            "description": "如原 Session 包含此值，请一并保留。"
+          },
+          "cookies": {
+            "type": "string",
+            "description": "如原 Session 包含 Cookie 字符串，请一并保留。"
+          }
+        },
+        "required": [
+          "accessToken",
+          "user",
+          "account"
+        ]
+      },
+      "SessionInfo": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "账号邮箱。"
+          },
+          "account_id": {
+            "type": "string",
+            "description": "账号空间标识。"
+          },
+          "plan": {
+            "type": "string",
+            "description": "Session 中声明的套餐。"
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "有效期截止时间。",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "description": "格式与有效期检查结果。",
+            "enum": [
+              "format_valid"
+            ]
+          },
+          "online_verified": {
+            "type": "boolean",
+            "description": "该接口不在线核实订阅，固定为 false。"
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "套餐编号。"
+          },
+          "name": {
+            "type": "string",
+            "description": "套餐名称。"
+          },
+          "description": {
+            "type": "string",
+            "description": "套餐说明。"
+          },
+          "fee": {
+            "type": "integer",
+            "description": "标准服务费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "member_fee": {
+            "type": "integer",
+            "description": "当前账户服务费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": ""
+            }
+          },
+          "tag": {
+            "type": "string",
+            "description": "套餐标签。"
+          }
+        }
+      },
+      "PriceSnapshot": {
+        "type": "object",
+        "properties": {
+          "standard": {
+            "type": "integer",
+            "description": "下单时标准服务费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "member_fee": {
+            "type": "integer",
+            "description": "本单服务费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "membership": {
+            "type": "string",
+            "description": "下单时会员等级代码。"
+          }
+        }
+      },
+      "PaymentSummary": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "付款状态；付款成功不代表后续订阅和续费已核实。",
+            "enum": [
+              "preparing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "review"
+            ]
+          },
+          "last4": {
+            "type": "string",
+            "description": "银行卡尾号；未记录时为空。"
+          },
+          "amount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "保存的付款金额；币种最小单位。"
+          },
+          "currency": {
+            "type": "string",
+            "description": "币种代码，不区分大小写。JPY 为日元，其余支持币种为百分之一单位。"
+          },
+          "fee_state": {
+            "type": "string",
+            "description": "服务费状态。",
+            "enum": [
+              "held",
+              "released",
+              "charged"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "付款结果说明。"
+          }
+        }
+      },
+      "Checkout": {
+        "type": "object",
+        "properties": {
+          "checkout_session_id": {
+            "type": "string",
+            "description": "本单结账标识。"
+          },
+          "url": {
+            "type": "string",
+            "description": "已生成的结账地址。",
+            "format": "uri"
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "是否已有可读取的结账地址。"
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "订单编号。"
+          },
+          "product_id": {
+            "type": "string",
+            "description": "套餐编号。"
+          },
+          "product_name": {
+            "type": "string",
+            "description": "套餐名称。"
+          },
+          "email": {
+            "type": "string",
+            "description": "订阅账号邮箱。"
+          },
+          "country": {
+            "type": "string",
+            "description": "订阅地区代码。"
+          },
+          "seats": {
+            "type": "integer",
+            "description": "席位数。"
+          },
+          "status": {
+            "type": "string",
+            "description": "订单状态。",
+            "enum": [
+              "draft",
+              "queued",
+              "processing",
+              "awaiting_payment",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "review"
+            ]
+          },
+          "fee": {
+            "type": "integer",
+            "description": "本单服务费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string",
+            "description": "订单来源。"
+          },
+          "workflow": {
+            "type": "string",
+            "description": "subscription 为订阅办理，link 为生成结账链接。",
+            "enum": [
+              "subscription",
+              "link"
+            ]
+          },
+          "keep_renewal": {
+            "type": "boolean",
+            "description": "本单是否要求保留自动续费。"
+          },
+          "activation": {
+            "type": "string",
+            "description": "active 才表示已确认订阅生效。",
+            "enum": [
+              "not_checked",
+              "pending",
+              "active",
+              "review"
+            ]
+          },
+          "renewal": {
+            "type": "string",
+            "description": "disabled 表示已核实关闭；kept 表示按要求保留。",
+            "enum": [
+              "not_started",
+              "pending",
+              "disabled",
+              "kept",
+              "review"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "description": "创建时间。",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "更新时间。",
+            "format": "date-time"
+          },
+          "price_snapshot": {
+            "$ref": "#/components/schemas/PriceSnapshot"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/PaymentSummary",
+            "description": "订单列表附带的付款摘要；仅生成链接时可为空对象。"
+          }
+        }
+      },
+      "OrderDetail": {
+        "type": "object",
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/Order"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "description": "记录编号。"
+                },
+                "stage": {
+                  "type": "string",
+                  "description": "阶段代码。"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "进度说明。"
+                },
+                "created_at": {
+                  "type": "string",
+                  "description": "记录时间。",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "checkout": {
+            "$ref": "#/components/schemas/Checkout"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/Payment"
+          }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "properties": {
+          "balance": {
+            "type": "integer",
+            "description": "账户总余额，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "frozen": {
+            "type": "integer",
+            "description": "冻结服务费，单位：分 R（100 分 R = 1 R）。",
+            "minimum": 0
+          },
+          "fee_override": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "账户专属服务费，单位分 R。"
+          },
+          "unit": {
+            "type": "string",
+            "description": "金额单位。",
+            "enum": [
+              "cent_R"
+            ]
+          },
+          "membership": {
+            "$ref": "#/components/schemas/Membership"
+          }
+        }
+      },
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "付款状态；付款成功不代表后续订阅和续费已核实。",
+            "enum": [
+              "preparing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "review"
+            ]
+          },
+          "last4": {
+            "type": "string",
+            "description": "银行卡尾号；未记录时为空。"
+          },
+          "amount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "保存的付款金额；币种最小单位。"
+          },
+          "currency": {
+            "type": "string",
+            "description": "币种代码，不区分大小写。JPY 为日元，其余支持币种为百分之一单位。"
+          },
+          "fee_state": {
+            "type": "string",
+            "description": "服务费状态。",
+            "enum": [
+              "held",
+              "released",
+              "charged"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "付款结果说明。"
+          },
+          "charged_amount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "记录的实收金额，币种最小单位；null 不代表未付款。"
+          },
+          "charged_currency": {
+            "type": "string",
+            "description": "实收币种代码。"
+          }
+        }
+      }
+    }
+  }
+}

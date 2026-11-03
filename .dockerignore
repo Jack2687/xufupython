@@ -1,0 +1,14 @@
+*
+!Dockerfile
+!requirements.txt
+!generator.py
+!backend/
+!backend/**
+!scripts/
+!scripts/serve.py
+!scripts/recover_post_payment.py
+!frontend/
+!frontend/**
+**/__pycache__/
+**/*.pyc
+frontend/node_modules/

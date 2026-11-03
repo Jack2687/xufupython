@@ -1,0 +1,15 @@
+.env
+.venv/
+.local/
+__pycache__/
+.pytest_cache/
+frontend/node_modules/
+*.log
+*.zip
+*.dump
+*.sql.gz
+*.bak
+*.pyc
+.env.*
+!.env.example
+webui/
