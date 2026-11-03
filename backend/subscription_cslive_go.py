@@ -486,19 +486,43 @@ def run_subscription(job: dict):
         pk = link_result.get('publishable_key') or PK_FALLBACK
         stripe = StripeHostedClient(pk=pk, proxy=proxy_url, timeout=90)
 
+        import uuid as _uuid
+        client_session_id = str(_uuid.uuid4())
+
         guid, muid, sid = stripe.register_device_fingerprint()
         init_resp = stripe.init(cs_id, hosted_url=hosted_url)
         init_checksum = str(init_resp['init_checksum'])
-        config_id = resolve_checkout_config_id(init_resp)
-        eid = resolve_eid(init_resp)
+        init_eid = resolve_eid(init_resp)
         elements_session_id = resolve_elements_session(init_resp)
 
-        tax_resp = stripe.update_tax_region(cs_id, billing_addr)
+        # cs_live HostedPrepare（cs_live.go:6888）：init → GET 托管页 → r.stripe.com/b 预热 →
+        # tax(eid=init_eid) → Page()，逐步串起 eid 链；confirm 才会被 Stripe 当作真实提交，
+        # 而不是回显未付款的页面状态。
+        stripe.load_hosted_page(hosted_url)
+        stripe.warmup(client_session_id)
+
+        tax_resp = stripe.update_tax_region(cs_id, billing_addr, eid=init_eid)
+        tax_eid = resolve_eid(tax_resp)
         expected_amount = resolve_expected_amount(tax_resp, init_resp)
         currency_from_stripe = str(tax_resp.get('currency') or init_resp.get('currency') or currency).upper()
+        if not elements_session_id:
+            elements_session_id = resolve_elements_session(tax_resp)
 
-        import uuid as _uuid
-        client_session_id = str(_uuid.uuid4())
+        # rememberHostedEid(tax)（cs_live.go:7120）：Page() 用 tax 返回的 eid。
+        hosted_eid = tax_eid if tax_eid != 'NA' else 'NA'
+        page_resp = stripe.read_page(cs_id, eid=hosted_eid)
+        if not elements_session_id:
+            elements_session_id = resolve_elements_session(page_resp)
+        # config_id = FirstTruthy(tax, init, page)（cs_live.go:6952）
+        config_id = (
+            str(tax_resp.get('config_id') or '').strip()
+            or str(init_resp.get('config_id') or '').strip()
+            or str(page_resp.get('config_id') or '').strip()
+            or resolve_checkout_config_id(init_resp)
+        )
+        # confirm eid = FirstTruthy(tax_eid, init_eid, hosted_eid, "NA")（cs_live.go:7010）
+        eid = next((e for e in (tax_eid, init_eid, hosted_eid) if e and e != 'NA'), 'NA')
+
         _check_proxy_session_lifetime(order_id)
 
         build = fetch_stripe_build_constants(session=stripe.session)

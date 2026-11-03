@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 from .. import payment_trace as trace
@@ -131,7 +133,6 @@ def build_confirm_form(
         "_stripe_version": STRIPE_VERSION,
         "js_checksum": str(runtime["js_checksum"]).strip(),
         "rv_timestamp": str(runtime["rv_timestamp"]).strip(),
-        "time_on_page": time_on_page,
         "guid": guid,
         "muid": muid,
         "sid": sid,
@@ -142,9 +143,12 @@ def build_confirm_form(
         "client_attribution_metadata[payment_method_selection_flow]": "automatic",
         "consent[terms_of_service]": "accepted",
     }
+    # cs_live.go:7015 referrer 带 fragment 的完整 HostedURL；7020 return_url 去掉 fragment。
+    # confirm 不带 time_on_page（cs_live.go:7010 的 confirm 表单没有该字段，发送会 400）。
+    if hosted_url:
+        form["referrer"] = hosted_url
     ref = _strip_fragment(hosted_url)
     if ref:
-        form["referrer"] = ref
         form["return_url"] = ref
     if elements_session_id:
         form["client_attribution_metadata[elements_session_id]"] = elements_session_id
@@ -199,16 +203,16 @@ class StripeHostedClient:
                 raise RuntimeError(f"{tag} 返回非 JSON") from exc
 
     def init(self, cs: str, hosted_url: str = "", timezone: str = "Asia/Manila") -> dict[str, Any]:
+        # cs_live.go:7099 hostedInitForm 只有 browser_locale/browser_timezone/key/eid/redirect_type/referrer，
+        # 不带 _stripe_version（版本只在 payment_methods 与 confirm 的表单字段里声明）。
         data = {
             "key": self.pk,
             "eid": "NA",
             "browser_locale": "en-US",
             "browser_timezone": timezone,
             "redirect_type": "url",
-            "_stripe_version": STRIPE_VERSION,
         }
-        ref = _strip_fragment(hosted_url)
-        if ref:
+        if hosted_url:
             data["referrer"] = hosted_url
         payload = self._post(f"/v1/payment_pages/{cs}/init", data, "init")
         if not payload.get("init_checksum"):
@@ -218,10 +222,56 @@ class StripeHostedClient:
             raise RuntimeError(f"checkout 状态不是 open（当前 {status!r}），请更换长链")
         return payload
 
-    def update_tax_region(self, cs: str, address: dict[str, str] | None = None) -> dict[str, Any]:
+    def load_hosted_page(self, hosted_url: str) -> int:
+        """GET 托管结账页（cs_live.go:6893）。激活服务端会话并开始 time-on-page 计时。"""
+        ref = _strip_fragment(hosted_url)
+        if not ref:
+            return 0
+        with trace.request("hosted_page") as diagnostic:
+            resp = self.session.get(
+                ref,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Referer": "https://chatgpt.com/",
+                },
+                timeout=self.timeout,
+            )
+            diagnostic.response(resp.status_code, resp.headers, "")
+            return resp.status_code
+
+    def warmup(self, client_session_id: str) -> None:
+        """付款元素挂载遥测（cs_live.go:6904 hostedClientFingerprintWarmup）。尽力而为，不阻断。"""
+        try:
+            payload = json.dumps(
+                {
+                    "type": "measurement",
+                    "event_name": "paymentElement.mount",
+                    "metrics": {"duration": "12000"},
+                    "client_session_id": client_session_id,
+                    "publish_key": self.pk,
+                },
+                separators=(",", ":"),
+            )
+            self.session.post(
+                "https://r.stripe.com/b",
+                data=payload,
+                headers={
+                    "Accept": "*/*",
+                    "Content-Type": "text/plain",
+                    "Origin": "https://js.stripe.com",
+                    "Referer": "https://js.stripe.com/",
+                },
+                timeout=self.timeout,
+            )
+        except Exception:  # noqa: BLE001 - 遥测失败不构成付款证据，也不中止准备
+            pass
+
+    def update_tax_region(self, cs: str, address: dict[str, str] | None = None, eid: str = "NA") -> dict[str, Any]:
+        # cs_live.go:7108 hostedTaxForm 只带 eid/tax_region/key，eid 复用 init 返回值。
         addr = address or HAR_ADDRESS
         data = {
-            "eid": "NA",
+            "eid": eid or "NA",
             "tax_region[country]": addr["country"],
             "tax_region[state]": addr["state"],
             "tax_region[city]": addr["city"],
@@ -230,6 +280,19 @@ class StripeHostedClient:
             "key": self.pk,
         }
         return self._post(f"/v1/payment_pages/{cs}", data, "tax_region")
+
+    def read_page(self, cs: str, eid: str = "NA") -> dict[str, Any]:
+        """GET /payment_pages/{cs}?eid=&key=（cs_live.go:7113 Page）。刷新 eid 链。"""
+        url = f"{STRIPE_API}/v1/payment_pages/{cs}?" + urlencode({"eid": eid or "NA", "key": self.pk})
+        with trace.request("page_read") as diagnostic:
+            resp = self.session.get(url, timeout=self.timeout)
+            diagnostic.response(resp.status_code, resp.headers, resp.text)
+            if resp.status_code != 200:
+                return {}
+            try:
+                return resp.json()
+            except Exception:  # noqa: BLE001
+                return {}
 
     def create_payment_method(self, form: dict[str, str]) -> dict[str, Any]:
         payload = self._post("/v1/payment_methods", form, "payment_methods")
