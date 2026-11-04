@@ -12,6 +12,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import requests
 from fastapi import APIRouter, Depends, Request
+from .customer_contract import order_hash
 
 from . import db, payment_trace as trace
 from . import cslive_go_checkout
@@ -237,7 +238,7 @@ async def create_order(request: Request):
         product = q.one('SELECT id,name,fee,enabled FROM products WHERE id=$1', product_id)
         require(product and product['enabled'], '套餐不存在或已下架', 404)
 
-        rh = digest(json.dumps([workflow, product_id, country, seats], ensure_ascii=False))
+        rh = order_hash(q, request, digest(json.dumps([workflow, product_id, country, seats], ensure_ascii=False)))
         old = q.one('SELECT id,status,request_hash FROM orders WHERE user_id=$1 AND idempotency_key=$2',
                     user['id'], idem_key)
         if old:
@@ -262,9 +263,10 @@ async def create_order(request: Request):
         order_id = uid()
         q.execute(
             "INSERT INTO orders(id,user_id,product_id,product_name,email,country,seats,status,fee,source,workflow,keep_renewal,price_snapshot,billing_address,idempotency_key,request_hash) "
-            "VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,'web',$9,$10,$11,$12,$13,$14)",
+            "VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$15,$9,$10,$11,$12,$13,$14)",
             order_id, user['id'], product_id, product['name'], sess_info['email'],
-            country, seats, fee, workflow, keep_renewal, price_snapshot, billing_address, idem_key, rh
+            country, seats, fee, workflow, keep_renewal, price_snapshot, billing_address, idem_key, rh,
+            'api' if hasattr(request.state, 'customer_hash') else 'web'
         )
         trace.record('accepted', 'completed', order_id=order_id, q=q)
         trace.record('billing', 'completed', 'billing_selected', order_id=order_id,

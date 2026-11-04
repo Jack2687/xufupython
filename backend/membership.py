@@ -56,4 +56,6 @@ def quote(request: Request,product_id:str=''):
         product=q.one('SELECT fee FROM products WHERE id=$1 AND enabled',product_id)
         require(product is not None,'套餐不存在或已下架',404)
         m=membership_for(current(request)['id'],q)
-        return {'fee':fee_for(m,product['fee']),'standard':product['fee'],'membership':m,'payment_connected':False}
+        payment=config('payment',q)
+        connected=payment.get('enabled') is True and payment.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
+        return {'fee':fee_for(m,product['fee']),'standard':product['fee'],'membership':m,'payment_connected':connected}

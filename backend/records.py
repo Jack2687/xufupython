@@ -1,5 +1,5 @@
 """Read-only customer and administrative records; no order execution routes."""
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from . import db
 from .common import *
 from .membership import membership_for,fee_for
@@ -71,11 +71,16 @@ def overview(request:Request):
 
 @router.get('/orders')
 @router.get('/v1/orders')
-def orders(request:Request,q:str='',status:str=''):
-    rows=db.all("SELECT "+ORDER_FIELDS+" FROM orders o WHERE user_id=$1 AND ($2='' OR email ILIKE '%'||$2||'%' OR id ILIKE '%'||$2||'%') AND ($3='' OR status=$3) ORDER BY created_at DESC,id DESC LIMIT 200",current(request)['id'],q,status)
+def orders(request:Request,q:str='',status:str='',workflow:str='',page:int=Query(1,ge=1,le=100000),page_size:int=Query(200,ge=1,le=200)):
+    require(status in ('','draft','queued','processing','awaiting_payment','succeeded','failed','cancelled','review'),'订单状态无效')
+    require(workflow in ('','link','subscription') and len(q)<=200,'订单筛选参数无效')
+    where=" FROM orders o WHERE user_id=$1 AND ($2='' OR email ILIKE '%'||$2||'%' OR id ILIKE '%'||$2||'%') AND ($3='' OR status=$3) AND ($4='' OR workflow=$4)"
+    args=(current(request)['id'],q,status,workflow)
+    rows=db.all('SELECT '+ORDER_FIELDS+where+' ORDER BY created_at DESC,id DESC LIMIT $5 OFFSET $6',*args,page_size,(page-1)*page_size)
     for r in rows:
         r['payment']=_order_list_payment(r)
-    return {'items':rows}
+    total=db.scalar('SELECT count(*)'+where,*args)
+    return {'items':rows,'page':page,'page_size':page_size,'total':total,'has_more':page*page_size<total}
 
 
 @router.get('/orders/{id}')

@@ -37,9 +37,10 @@ from backend.main import app
 from backend.common import uid,digest,encrypt,decrypt,now
 from backend import renewals,proxies
 from backend.seed import DEFAULTS
+from test_customer_api import CustomerApiTests
 
 
-class BackendTests(unittest.TestCase):
+class BackendTests(CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -289,7 +290,7 @@ class BackendTests(unittest.TestCase):
 
     def test_13_disabled_payment_and_frontend_authorized_changes(self):
         self.assertFalse(self.ok(self.client.get('/api/public'))['payment_connected'])
-        excluded=[('POST','/api/v1/orders'),('POST','/api/orders/fake/cancel'),('POST','/api/admin/orders/fake/close'),('POST','/api/admin/orders/fake/payment/check'),('POST','/api/orders/fake/payment/confirm')]
+        excluded=[('POST','/api/orders/fake/cancel'),('POST','/api/admin/orders/fake/close'),('POST','/api/admin/orders/fake/payment/check'),('POST','/api/orders/fake/payment/confirm')]
         for method,path in excluded:self.assertEqual(self.client.request(method,path,json={}).status_code,404,path)
         tables={r['table_name'] for r in db.all("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")}
         self.assertFalse(tables & {'jobs','checkout_runs','payment_runs','subscription_protocol'})
@@ -1148,7 +1149,7 @@ class BackendTests(unittest.TestCase):
         actual={(path,method) for path,operations in app.openapi()['paths'].items() if path.startswith('/api/v1/') for method in operations}
         documented={(path,method) for path,operations in spec['paths'].items() for method in operations}
         self.assertEqual(documented,actual)
-        self.assertEqual(len(documented),8)
+        self.assertEqual(len(documented),18)
         user_id,_,user=self.new_user()
         try:
             key=self.ok(user.post('/api/keys',json={'name':'contract test'}))['key']
@@ -1165,9 +1166,9 @@ class BackendTests(unittest.TestCase):
                 self.assertNotIn(obsolete,spec['components']['schemas']['Payment']['properties'])
             self.assertEqual(set(spec['components']['schemas']['PriceSnapshot']['properties']),{'standard','member_fee','membership'})
             page=(ROOT/'frontend/src/components/ApiDocs.vue').read_text(encoding='utf-8')
-            for obsolete in ('workflow=checkout','prepare=true','automatic_running','can_check','Idempotency-Key'):
+            for obsolete in ('workflow=checkout','prepare=true','automatic_running','can_check'):
                 self.assertNotIn(obsolete,page)
-            self.assertEqual(self.client.post('/api/v1/orders',headers=headers,json={}).status_code,404)
+            self.assertEqual(self.client.post('/api/v1/orders',headers=headers,json={}).status_code,400)
         finally:user.close()
 
 

@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter,Depends,Request
 from . import db
 from .common import *
+from . import customer_contract
 from .proxies import proxy_client,acquire
 
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
@@ -82,8 +83,15 @@ async def create_task(request:Request):
     c,expiry=credentials(s,info);enc=encrypt(json.dumps(c));ah=digest(info['account_id'])
     with db.transaction() as q:
         q.execute('SELECT pg_advisory_xact_lock(1886002)')
+        api_request=hasattr(request.state,'customer_hash')
+        if api_request:
+            saved=customer_contract.replay(q,request,'renewal')
+            if saved:
+                saved['status']=q.scalar('SELECT status FROM renewal_tasks WHERE id=$1',saved['id'])
+                return saved
         old=q.one('SELECT k.task_id,k.account_hash,t.status FROM renewal_request_keys k JOIN renewal_tasks t ON t.id=k.task_id WHERE k.user_id=$1 AND k.key=$2',user['id'],key)
         if old:
+            require(not api_request,'该请求标识已用于网页申请，请使用新的 Idempotency-Key',409)
             require(old['account_hash']==ah,'同一请求标识不能用于不同账号',409)
             return {'id':old['task_id'],'status':old['status'],'replayed':True}
         previous=q.one("SELECT id,user_id,status FROM renewal_tasks WHERE account_hash=$1 AND status IN ('queued','processing','checking','review') FOR UPDATE",ah)
@@ -101,6 +109,7 @@ async def create_task(request:Request):
             q.execute("INSERT INTO renewal_events(task_id,status,message) VALUES($1,'queued','申请已受理，等待处理；不收取服务费。')",id)
         q.execute('INSERT INTO renewal_request_keys(user_id,key,account_hash,task_id) VALUES($1,$2,$3,$4)',user['id'],key,ah,id)
         audit(q,request,'renewal_request',id,'提交独立关闭续费申请')
+        if api_request:customer_contract.remember(q,request,'renewal',{'id':id,'status':status,'replayed':bool(previous)})
     return {'id':id,'status':status,'replayed':bool(previous)}
 
 

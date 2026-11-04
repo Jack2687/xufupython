@@ -91,7 +91,7 @@ import (
 	strings "strings"
 	sync "sync"
 	time "time"
-	tzdata "time/tzdata"
+	_ "time/tzdata"
 	unicode "unicode"
 	utf16 "unicode/utf16"
 	utf8 "unicode/utf8"

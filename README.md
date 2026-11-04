@@ -2,7 +2,7 @@
 
 FastAPI + PostgreSQL 的订阅服务管理系统，包含账户、会员、钱包、账单资料、代理管理、订阅办理、结账链接、续费处理和订单记录。Vue 前端由应用直接提供。
 
-对外 API 文档位于 `/docs`，OpenAPI 文件位于 `/api/openapi.json`。API 密钥当前开放 8 个接口，用于查询、报价、Session 检查与兑换；订阅办理、生成链接及关闭续费通过网页操作。
+对外 API 文档位于 `/docs`，OpenAPI 文件位于 `/api/openapi.json`。文档版本 1.2.0，API 密钥开放 18 个接口，覆盖账户与套餐、订阅办理与结账链接、关闭自动续费、订单、余额流水、充值申请、兑换及 Session 检查。提供 cURL、Node.js、Python 示例与完整调用步骤；所有接口仅访问密钥所属账户的数据。创建订单、续费任务及充值申请必须携带 `Idempotency-Key`。维护与验证说明见 [客户 API 文档](docs/customer-api.md)。
 
 ## Docker 部署
 
@@ -53,6 +53,7 @@ npm --prefix frontend run build
 ./.venv/Scripts/python.exe tests/test_backend.py
 ./.venv/Scripts/python.exe tests/test_post_payment.py
 node --experimental-strip-types --test frontend/tests/paymentJourney.test.mjs
+node --experimental-strip-types --test frontend/tests/apiDocs.test.mjs
 npm --prefix frontend run build
 ```
 

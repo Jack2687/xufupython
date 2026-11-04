@@ -2,6 +2,7 @@ import secrets
 from fastapi import APIRouter,Depends,Request
 from . import db
 from .common import *
+from . import customer_contract
 
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
 LEDGER_QUERY="""WITH history AS (
@@ -51,9 +52,14 @@ async def topup(request: Request):
     require(0<=length(proof)<=500,'充值金额或备注超出范围')
     user_id=current(request)['id']
     with db.transaction() as q:
+        api_request=hasattr(request.state,'customer_hash')
+        if api_request:
+            old=customer_contract.replay(q,request,'topup',lock=True)
+            if old:return old
         q.one('SELECT id FROM users WHERE id=$1 FOR UPDATE',user_id)
         require(q.scalar("SELECT count(*) FROM topups WHERE user_id=$1 AND status='pending'",user_id)<3,'已有 3 笔待审核充值，请先等待审核')
         id=uid();q.execute('INSERT INTO topups(id,user_id,amount,proof) VALUES($1,$2,$3,$4)',id,user_id,amount,proof)
+        if api_request:customer_contract.remember(q,request,'topup',{'id':id})
     return {'id':id}
 
 
