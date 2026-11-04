@@ -44,7 +44,15 @@ class ExperienceTests:
         _,_,member=self.new_user()
         token=self.ok(member.post('/api/keys',json={'name':'permission audit'}))['key']
         anonymous=TestClient(app);key_client=TestClient(app,headers={'Authorization':'Bearer '+token})
-        for route in app.routes:
+        # Newer FastAPI versions retain included routers instead of flattening
+        # their routes at registration. Walk both representations without
+        # silently omitting any management endpoint from the permission audit.
+        def routes(router):
+            for route in router.routes:
+                if hasattr(route,'original_router'):yield from routes(route.original_router)
+                else:yield route
+        checked=0
+        for route in routes(app):
             if not route.path.startswith('/api/admin/'):continue
             path=route.path
             for param in route.param_convertors:path=path.replace('{'+param+'}','1' if param=='id' and '/risk/' in path else 'fixture')
@@ -53,6 +61,8 @@ class ExperienceTests:
                     self.assertEqual(anonymous.request(method,path,json={}).status_code,401)
                     self.assertEqual(member.request(method,path,json={}).status_code,403)
                     self.assertEqual(key_client.request(method,path,json={}).status_code,403)
+                    checked+=1
+        self.assertGreater(checked,40)
         self.assertEqual(key_client.get('/api/order-updates').status_code,403)
 
     def test_flow_switches_defaults_persistence_validation_and_scope(self):
