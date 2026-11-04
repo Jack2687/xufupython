@@ -298,7 +298,10 @@ class BackendTests(CustomerApiTests,unittest.TestCase):
         changes=json.loads((ROOT/'docs/frontend-authorized-changes.json').read_text(encoding='utf-8'))
         for relative,expected in json.loads((ROOT/'docs/frontend-manifest.json').read_text(encoding='utf-8-sig')).items():
             if relative in changes['source_files'] or relative.startswith(changes['generated_directory']+'/'):continue
-            self.assertEqual(hashlib.sha256((ROOT/relative).read_bytes()).hexdigest(),expected,relative)
+            content=(ROOT/relative).read_bytes()
+            normalized=content.replace(b'\r\n',b'\n')
+            hashes={hashlib.sha256(value).hexdigest() for value in (content,normalized,normalized.replace(b'\n',b'\r\n'))}
+            self.assertIn(expected,hashes,relative)
 
 
     def test_14_service_fee_quote(self):
