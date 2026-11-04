@@ -37,7 +37,11 @@ func (t *gptpay_transaction) confirmActivation() error {
 			return e
 		}
 	}
-	// 令牌已在 finishPayment 开头统一刷新，这里只轮询订阅是否生效，不再单独刷新。
+	// 令牌已在 finishPayment 开头统一刷新；但付款回跳页 /checkout/verify 可能再次轮换
+	// 会话，使刚刷新的令牌失效。因此这里保留“查订阅遇 401 则按需再刷新一次”的兜底——
+	// 此时距上次刷新之间已发生 /checkout/verify 会话轮换，这次刷新能拿到新令牌，
+	// 不会出现关续费阶段那种“数秒内连续刷新拿不到令牌”的情况。
+	refreshed := false
 	for i := 0; i < 5; i++ {
 		if i > 0 {
 			if e := t.http.Pause(2); e != nil {
@@ -45,6 +49,16 @@ func (t *gptpay_transaction) confirmActivation() error {
 			}
 		}
 		data, e := t.platform.Subscriptions(false)
+		if protocol_FlowErrorCode(e) == "http_401" && !refreshed {
+			refreshed = true
+			if e = t.platform.Refresh(); e != nil {
+				return e
+			}
+			if e = t.save(""); e != nil {
+				return e
+			}
+			data, e = t.platform.Subscriptions(false)
+		}
 		if protocol_FlowErrorCode(e) == "subscription_not_found" && cp.Payment == "charged" {
 			continue
 		}
