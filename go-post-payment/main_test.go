@@ -61,7 +61,7 @@ func fixture(t *testing.T, keep bool, steps ...step) (*gptpay_transaction, *fixt
 	return &gptpay_transaction{cp: cp, http: tr, platform: p, progress: &progress{}, saveFn: func(*model_Checkpoint, string) error { return nil }}, tr
 }
 func TestFinish401RefreshKeep(t *testing.T) {
-	tx, tr := fixture(t, true, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""})
+	tx, tr := fixture(t, true, step{"subscriptions", 401, `{}`, ""}, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""})
 	if err := tx.finishPayment(); err != nil {
 		t.Fatal(err)
 	}
@@ -69,8 +69,87 @@ func TestFinish401RefreshKeep(t *testing.T) {
 		t.Fatal("lost refreshed state")
 	}
 }
+func TestFinish401RefreshOnLaterActivationRound(t *testing.T) {
+	tx, tr := fixture(t, true,
+		step{"subscriptions", 401, `{}`, ""},
+		step{"/api/auth/session", 200, refreshed, ""},
+		step{"subscriptions", 404, `{"detail":"No subscription found for account"}`, ""},
+		step{"subscriptions", 401, `{}`, ""},
+		step{"/api/auth/session", 200, refreshed, ""},
+		step{"subscriptions", 200, active, ""},
+	)
+	if err := tx.finishPayment(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.steps) != 0 || len(tr.pauses) != 1 || tr.pauses[0] != 2 || tx.cp.Phase != "completed" {
+		t.Fatal("later activation round did not refresh and complete")
+	}
+}
+func TestCancellationRefreshesAfterActivationRefresh(t *testing.T) {
+	tx, tr := fixture(t, false,
+		step{"subscriptions", 401, `{}`, ""},
+		step{"/api/auth/session", 200, refreshed, ""},
+		step{"subscriptions", 200, active, ""},
+		step{"/api/auth/session", 200, `{"accessToken":"renewal-access","account":{"id":"fixture-account"}}`, ""},
+		step{"subscriptions", 200, active, ""},
+		step{"subscriptions/cancel", 200, `{}`, ""},
+		step{"subscriptions", 200, off, ""},
+	)
+	if err := tx.finishPayment(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.steps) != 0 || tx.cp.AccessToken != "renewal-access" || tx.cp.Renewal != "off" || tx.cp.Phase != "completed" {
+		t.Fatal("cancellation did not use its own refresh")
+	}
+}
+func TestEmptyTokenRefreshRetries(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		attempts   int
+		interval   float64
+		configured bool
+		success    bool
+	}{
+		{"default_success", 4, 3, false, true},
+		{"default_exhausted", 4, 3, false, false},
+		{"configured_success", 2, 1, true, true},
+		{"configured_exhausted", 2, 1, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			steps := []step{{"subscriptions", 200, active, ""}}
+			for i := 0; i < tc.attempts; i++ {
+				body := `{}`
+				if tc.success && i == tc.attempts-1 {
+					body = refreshed
+				}
+				steps = append(steps, step{"/api/auth/session", 200, body, ""})
+			}
+			want := "session_expired"
+			if tc.success {
+				want = ""
+				steps = append(steps, step{"subscriptions", 200, off, ""})
+			}
+			tx, tr := fixture(t, false, steps...)
+			if tc.configured {
+				tx.platform.RefreshRetries = tc.attempts
+				tx.platform.RefreshInterval = tc.interval
+			}
+			if got := protocol_FlowErrorCode(tx.finishPayment()); got != want {
+				t.Fatalf("got %s want %s", got, want)
+			}
+			if len(tr.steps) != 0 || len(tr.pauses) != tc.attempts-1 || tx.cp.Payment != "charged" || tx.cp.CancelAttempts != 0 {
+				t.Fatal("refresh retry limit or payment state changed")
+			}
+			for _, pause := range tr.pauses {
+				if pause != tc.interval {
+					t.Fatalf("refresh interval = %v, want %v", pause, tc.interval)
+				}
+			}
+		})
+	}
+}
 func TestFullCancellationSequence(t *testing.T) {
-	tx, tr := fixture(t, false, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions/cancel", 200, `{}`, ""}, step{"subscriptions", 200, off, ""})
+	tx, tr := fixture(t, false, step{"subscriptions", 200, active, ""}, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions/cancel", 200, `{}`, ""}, step{"subscriptions", 200, off, ""})
 	writes := 0
 	tx.saveFn = func(cp *model_Checkpoint, phase string) error {
 		if phase == "cancellation_requested" {
@@ -90,7 +169,7 @@ func TestFullCancellationSequence(t *testing.T) {
 }
 func TestCancelledOrUnknownSkipsWrite(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{{off, ""}, {`{}`, "renewal_state_unknown"}} {
-		tx, tr := fixture(t, false, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, tc.body, ""})
+		tx, tr := fixture(t, false, step{"subscriptions", 200, active, ""}, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, tc.body, ""})
 		if got := protocol_FlowErrorCode(tx.finishPayment()); got != tc.want {
 			t.Fatalf("got %s want %s", got, tc.want)
 		}
@@ -107,7 +186,7 @@ func TestLostCancellationResponseChecksBeforeRetry(t *testing.T) {
 		if closed {
 			check = off
 		}
-		steps := []step{{"/api/auth/session", 200, refreshed, ""}, {"subscriptions", 200, active, ""}, {"subscriptions", 200, active, ""}, {"subscriptions/cancel", 0, "", "network_error"}, {"subscriptions", 200, check, ""}}
+		steps := []step{{"subscriptions", 200, active, ""}, {"/api/auth/session", 200, refreshed, ""}, {"subscriptions", 200, active, ""}, {"subscriptions/cancel", 0, "", "network_error"}, {"subscriptions", 200, check, ""}}
 		if !closed {
 			steps = append(steps, step{"subscriptions/cancel", 200, `{}`, ""}, step{"subscriptions", 200, off, ""})
 		}
@@ -125,7 +204,7 @@ func TestLostCancellationResponseChecksBeforeRetry(t *testing.T) {
 	}
 }
 func TestCheckpointFailurePreventsCancellation(t *testing.T) {
-	tx, tr := fixture(t, false, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""})
+	tx, tr := fixture(t, false, step{"subscriptions", 200, active, ""}, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""})
 	tx.saveFn = func(_ *model_Checkpoint, phase string) error {
 		if phase == "cancellation_requested" {
 			return protocol_NewError("checkpoint_failed")
@@ -138,26 +217,26 @@ func TestCheckpointFailurePreventsCancellation(t *testing.T) {
 }
 func TestBoundedActivationAndCancellation(t *testing.T) {
 	missing := step{"subscriptions", 404, `{"detail":"No subscription found for account"}`, ""}
-	tx, tr := fixture(t, false, step{"/api/auth/session", 200, refreshed, ""}, missing, missing, missing, missing, missing)
+	tx, tr := fixture(t, false, missing, missing, missing, missing, missing)
 	if protocol_FlowErrorCode(tx.finishPayment()) != "activation_pending" || len(tr.pauses) != 4 {
 		t.Fatal("unbounded activation")
 	}
-	tx, tr = fixture(t, false, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions/cancel", 200, `{}`, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""})
+	tx, tr = fixture(t, false, step{"subscriptions", 200, active, ""}, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions/cancel", 200, `{}`, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""})
 	if protocol_FlowErrorCode(tx.finishPayment()) != "cancellation_pending" || len(tr.pauses) != 4 {
 		t.Fatal("unbounded cancellation check")
 	}
 }
 func TestRecoveryCannotResetCancellationLimit(t *testing.T) {
-	tx, tr := fixture(t, false, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""}, step{"subscriptions", 200, active, ""})
+	tx, tr := fixture(t, false, step{"subscriptions", 200, active, ""}, step{"/api/auth/session", 200, refreshed, ""}, step{"subscriptions", 200, active, ""})
 	tx.cp.CancelAttempts = 2
 	if protocol_FlowErrorCode(tx.finishPayment()) != "cancellation_pending" || len(tr.paths) != 3 {
 		t.Fatal("replayed cancellation")
 	}
 }
 func TestLandingDoesNotReplaceSubscriptionEvidence(t *testing.T) {
-	tx, tr := fixture(t, true, step{"/api/auth/session", 200, refreshed, ""}, step{"/checkout/verify", 403, `<html>challenge</html>`, ""}, step{"subscriptions", 200, active, ""})
+	tx, tr := fixture(t, true, step{"/checkout/verify", 403, `<html>challenge</html>`, ""}, step{"subscriptions", 200, active, ""})
 	tx.cp.ReturnURL = "https://chatgpt.com/checkout/verify?stripe_session_id=cs_fixture"
-	if tx.finishPayment() != nil || len(tr.paths) != 3 {
+	if tx.finishPayment() != nil || len(tr.paths) != 2 {
 		t.Fatal("landing became authority")
 	}
 }
@@ -166,8 +245,8 @@ func TestRefresh403AndMismatchStop(t *testing.T) {
 		status     int
 		body, want string
 	}{{403, `<html>challenge</html>`, "invalid_json_response"}, {200, `{"accessToken":"other","account":{"id":"other-account"}}`, "account_mismatch"}} {
-		tx, tr := fixture(t, false, step{"/api/auth/session", tc.status, tc.body, ""})
-		if protocol_FlowErrorCode(tx.finishPayment()) != tc.want || len(tr.paths) != 1 || tx.cp.AccessToken != "old-access" {
+		tx, tr := fixture(t, false, step{"subscriptions", 200, active, ""}, step{"/api/auth/session", tc.status, tc.body, ""})
+		if protocol_FlowErrorCode(tx.finishPayment()) != tc.want || len(tr.paths) != 2 || tx.cp.AccessToken != "old-access" {
 			t.Fatal("refresh error was ignored")
 		}
 	}

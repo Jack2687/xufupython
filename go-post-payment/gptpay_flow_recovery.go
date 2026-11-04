@@ -4,15 +4,6 @@ package main
 import ()
 
 func (t *gptpay_transaction) finishPayment() error {
-	// 付款成功后 OpenAI 会作废旧 access_token 并轮换会话，这里统一刷新一次拿到新令牌；
-	// 之后的核实订阅、关闭续费都复用这个新令牌，不再各自刷新（付款后 OpenAI 数秒内不会
-	// 再次轮换，紧接着的二次刷新会持续返回不含令牌的 200 而被误判为 session_expired）。
-	if e := t.platform.Refresh(); e != nil {
-		return e
-	}
-	if e := t.save(""); e != nil {
-		return e
-	}
 	if e := t.confirmActivation(); e != nil {
 		return e
 	}
@@ -37,11 +28,6 @@ func (t *gptpay_transaction) confirmActivation() error {
 			return e
 		}
 	}
-	// 令牌已在 finishPayment 开头统一刷新；但付款回跳页 /checkout/verify 可能再次轮换
-	// 会话，使刚刷新的令牌失效。因此这里保留“查订阅遇 401 则按需再刷新一次”的兜底——
-	// 此时距上次刷新之间已发生 /checkout/verify 会话轮换，这次刷新能拿到新令牌，
-	// 不会出现关续费阶段那种“数秒内连续刷新拿不到令牌”的情况。
-	refreshed := false
 	for i := 0; i < 5; i++ {
 		if i > 0 {
 			if e := t.http.Pause(2); e != nil {
@@ -49,8 +35,7 @@ func (t *gptpay_transaction) confirmActivation() error {
 			}
 		}
 		data, e := t.platform.Subscriptions(false)
-		if protocol_FlowErrorCode(e) == "http_401" && !refreshed {
-			refreshed = true
+		if protocol_FlowErrorCode(e) == "http_401" {
 			if e = t.platform.Refresh(); e != nil {
 				return e
 			}
@@ -83,7 +68,9 @@ func (t *gptpay_transaction) confirmActivation() error {
 func (t *gptpay_transaction) disableRenewal() error {
 	cp := t.cp
 	t.progress.emit(model_ProgressStageCancellation, model_ProgressRunning, "")
-	// 令牌已在 finishPayment 开头统一刷新，这里不再重复刷新，直接复用新令牌关闭续费。
+	if e := t.platform.Refresh(); e != nil {
+		return e
+	}
 	if e := t.save("cancellation"); e != nil {
 		return e
 	}
