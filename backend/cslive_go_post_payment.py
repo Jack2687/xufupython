@@ -395,7 +395,7 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=N
         if not lock.scalar('SELECT pg_try_advisory_xact_lock($1,hashtext($2))', FOLLOWUP_LOCK, order_id):
             return {'state': 'busy', 'warning_code': 'followup_busy'}
         row = db.one('SELECT o.status,o.workflow,o.keep_renewal,s.paid_at,s.checkout_session_id,s.credentials_enc,s.trace_round,s.subscription_flow '
-                     'FROM orders o JOIN subscription_runs s ON s.order_id=o.id WHERE o.id=$1', order_id)
+                     'FROM orders o JOIN subscription_runs s ON s.order_id=o.id WHERE o.id=$1 AND o.deleted_at IS NULL', order_id)
         if not row or row['workflow'] != 'subscription' or row['status'] != 'succeeded' or not row['paid_at']:
             raise FollowupError('payment_evidence_missing')
         if executor != EXECUTOR or row['subscription_flow'] != FLOW:
@@ -438,6 +438,10 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=N
                     raise FollowupError('proxy_session_expired')
                 if cp['checkout_id'] != row['checkout_session_id']:
                     raise FollowupError('checkpoint_mismatch')
+                from .post_payment_delay import wait_before_refresh, DEFAULT_SECONDS
+                delay = pcfg.get('post_payment_delay_seconds', DEFAULT_SECONDS)
+                if not wait_before_refresh(order_id, row['paid_at'], delay, proxy['expires_at']):
+                    raise FollowupError('proxy_session_expired')
                 execute(cp, lambda phase: _save(order_id, cp, phase))
                 return {'state': 'completed', 'warning_code': ''}
             except Exception as exc:

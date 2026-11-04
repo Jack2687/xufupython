@@ -319,7 +319,7 @@ def claim_subscription():
             "s.credentials_enc,s.credentials_expires_at,s.card_enc,s.workspace_name,s.premium_seats,s.billing_snapshot,s.session_id,s.subscription_flow,"
             "s.network_retry_count,s.checkout_checkpoint_enc"
             " FROM orders o JOIN subscription_runs s ON s.order_id=o.id"
-            " WHERE o.status='queued' AND o.workflow=ANY($2::text[]) AND s.subscription_flow=$3"
+            " WHERE o.deleted_at IS NULL AND o.status='queued' AND o.workflow=ANY($2::text[]) AND s.subscription_flow=$3"
             " AND s.network_retry_at<=now() AND s.payment_submit_started_at IS NULL AND s.paid_at IS NULL"
             " AND (SELECT count(*) FROM orders x JOIN subscription_runs y ON y.order_id=x.id "
             "      WHERE x.user_id=o.user_id AND x.status='processing' AND x.workflow IN ('subscription','link') AND y.subscription_flow=$3)<$1"

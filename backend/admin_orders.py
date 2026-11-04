@@ -57,22 +57,39 @@ async def close_order(id: str, request: Request):
 @router.post('/orders/batch-delete')
 async def delete_orders(request: Request):
     value = await body(request); ids = value.get('ids')
-    require(isinstance(ids,list) and 1 <= len(ids) <= 500 and all(isinstance(x,str) and 1 <= len(x) <= 80 for x in ids),
-            '请选择 1～500 笔订单')
-    require(value.get('accepted') is True, '请确认同时删除管理员和客户的订单记录')
+    require(isinstance(ids,list) and len(ids) > 0 and all(isinstance(x,str) and 1 <= len(x) <= 80 for x in ids),
+            '请选择订单')
     ids = sorted(set(ids))
     with db.transaction() as q:
-        lock_queues(q)
-        rows = q.all('SELECT id,user_id,status,workflow,fee,activation,renewal,deleted_at FROM orders WHERE id=ANY($1) ORDER BY id FOR UPDATE',ids)
-        require(len(rows)==len(ids),'部分订单不存在，请刷新后重试',404)
-        pending = [row for row in rows if row['deleted_at'] is None]
-        for row in pending:
-            for key in (1886011, 1886012):
-                require(q.scalar('SELECT pg_try_advisory_xact_lock($1,hashtext($2))', key, row['id']),
-                        '订单仍在处理后续结果，请稍后再删除', 409)
-            settled = row['status'] in ('failed','cancelled','draft') or (
-                row['status']=='succeeded' and row['activation']!='pending' and row['renewal'] not in ('pending','retrying'))
-            require(settled and not held_fee(q,row), '包含执行中、待核实或未结束的订单，请先完成或人工关闭后再删除',409)
-        count=q.execute('UPDATE orders SET deleted_at=now() WHERE id=ANY($1) AND deleted_at IS NULL', ids)
-        if count:audit(q,request,'orders.deleted','batch', '从管理员及客户视图删除订单：'+','.join(row['id'] for row in pending))
-    return {'ok': True, 'deleted': count}
+        # The order lock also serializes worker settlement and manual closure.
+        rows = q.all('SELECT id,user_id,status,fee,deleted_at FROM orders WHERE id=ANY($1) ORDER BY id FOR UPDATE',ids)
+        eligible = []
+        skipped = 0
+        for row in rows:
+            if row['status'] == 'processing':
+                skipped += 1
+                continue
+            if not all(q.scalar('SELECT pg_try_advisory_xact_lock($1,hashtext($2))',key,row['id'])
+                       for key in (1886011,1886012)):
+                skipped += 1
+                continue
+            eligible.append(row)
+        for owner in sorted({row['user_id'] for row in eligible}):
+            q.one('SELECT id FROM users WHERE id=$1 FOR UPDATE',owner)
+        released = 0
+        for row in eligible:
+            release = held_fee(q,row)
+            if not release:
+                continue
+            q.execute('UPDATE users SET frozen=GREATEST(0,frozen-$2),updated_at=now() WHERE id=$1',row['user_id'],release)
+            q.execute("INSERT INTO ledger(user_id,kind,amount,balance_after,frozen_after,reference,description,actor_id,order_id) "
+                      "SELECT id,'unfreeze',0,balance,frozen,$2,'删除订单，释放冻结服务费',$3,$4 FROM users WHERE id=$1",
+                      row['user_id'],'unfreeze:'+row['id'],current(request)['id'],row['id'])
+            payment_trace.record('funds','completed','release',order_id=row['id'],q=q)
+            released += release
+        deleted = q.all('UPDATE orders SET deleted_at=now() WHERE id=ANY($1) AND deleted_at IS NULL RETURNING id',
+                        [row['id'] for row in eligible])
+        count = len(deleted)
+        if count or released:
+            audit(q,request,'orders.deleted','batch', '从管理员及客户视图删除订单：'+','.join(sorted(row['id'] for row in deleted))+f'；释放冻结服务费 {released} 分')
+    return {'ok': True, 'deleted': count, 'released': released, 'skipped': skipped}

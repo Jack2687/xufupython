@@ -46,6 +46,8 @@ CODES = {
     'invalid_return_url': '回跳地址不符合本单校验要求，未访问该地址',
     'session_token_required': '缺少刷新登录态所需的 Session Cookie',
     'session_expired': '刷新接口未返回有效登录态',
+    'post_payment_wait': '付款已成功，按配置等待后强制刷新 Session',
+    'post_payment_wait_completed': '付款后等待结束，即将强制刷新 Session',
     'renewal_state_unknown': '自动续费状态缺失或冲突，未提交取消请求',
     'cancellation_pending': '已请求关闭续费，结果仍待核实',
     'checkpoint_missing': '本单没有可恢复的付款后收尾记录',
@@ -128,6 +130,10 @@ def _diagnostics(values):
         elif key == 'retry_delay_seconds' and type(value) is int and 5 <= value <= 3600:
             result[key] = value
         elif key == 'checkout_reused' and type(value) is bool:
+            result[key] = value
+        elif key == 'post_payment_delay_seconds' and type(value) is int and 0 <= value <= 300:
+            result[key] = value
+        elif key == 'post_payment_wait_ms' and type(value) is int and 0 <= value <= 300000:
             result[key] = value
         elif key in {'connection_ready_ms', 'request_write_ms', 'first_byte_ms',
                      'response_wait_ms', 'network_stage_elapsed_ms'} and type(value) in (int, float) and 0 <= value <= 240000:

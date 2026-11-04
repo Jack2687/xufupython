@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from . import db
 from .common import *
 from .seed import DEFAULTS
+from .post_payment_delay import DEFAULT_SECONDS, MAX_SECONDS
 
 router = APIRouter(prefix='/api/admin', dependencies=[Depends(administrator)])
 COUNTRIES = {'PH','US','JP','SG','GB','EG','TR'}
@@ -14,7 +15,8 @@ RANGES = {
  'payment': {'max_parallel':(1,20),'per_user_parallel':(1,5),'prepare_timeout_seconds':(30,300),'quote_timeout_seconds':(30,600),'result_timeout_seconds':(30,600),'requests_per_minute':(1,20),'subscription_wait_seconds':(30,1800),'renewal_check_interval_seconds':(5,300),'renewal_check_limit':(1,60),'network_restart_limit':(0,5),'activation_check_interval_seconds':(2,300),'activation_check_limit':(1,120)},
  'proxy': {'request_timeout_seconds':(10,120)}, 'site': {'invite_rate':(0,0)}
 }
-OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit'}}
+RANGES['payment']['post_payment_delay_seconds'] = (0,MAX_SECONDS)
+OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds'}}
 
 
 def validate_config(key, v):
@@ -79,7 +81,9 @@ def validate_config(key, v):
 
 @router.get('/settings')
 def settings():
-    return {r['key']:r['value'] for r in db.all('SELECT key,value FROM settings ORDER BY key')}
+    result = {r['key']:r['value'] for r in db.all('SELECT key,value FROM settings ORDER BY key')}
+    result['payment'].setdefault('post_payment_delay_seconds', DEFAULT_SECONDS)
+    return result
 
 
 @router.put('/settings/{key}')

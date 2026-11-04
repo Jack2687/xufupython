@@ -64,51 +64,112 @@ class AdminOrderPricingTests:
             self.assertEqual(self.ok(self.close_fixture_order(zero))['replayed'],True)
             self.assertEqual(db.scalar('SELECT frozen FROM users WHERE id=$1',owner),0)
 
-    def test_admin_delete_atomic_and_hidden_from_all_customer_views(self):
-        with self.api_fixture() as (owner,client,_):
+    def test_admin_delete_mixed_states_hidden_from_all_customer_views(self):
+        with self.api_fixture() as (owner,client,other):
             payload=self.api_payload('subscription');headers={'Idempotency-Key':uid()}
             order=self.ok(client.post('/api/v1/orders',json=payload,headers=headers))['id']
             active=self.ok(client.post('/api/v1/orders',json=payload,headers={'Idempotency-Key':uid()}))['id']
             self.ok(self.close_fixture_order(order))
-            request={'ids':[order,active],'accepted':True}
-            self.assertEqual(self.client.post('/api/admin/orders/batch-delete',json=request).status_code,409)
-            self.assertIsNone(db.scalar('SELECT deleted_at FROM orders WHERE id=$1',order))
+            request={'ids':[order,active,order,'missing-order']}
+            self.assertEqual(other.post('/api/admin/orders/batch-delete',json=request).status_code,403)
             before=db.one('SELECT balance,frozen FROM users WHERE id=$1',owner)
-            request['ids']=[order]
-            self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=request))['deleted'],1)
-            self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=request))['deleted'],0)
+            self.assertGreater(before['frozen'],0)
+            result=self.ok(self.client.post('/api/admin/orders/batch-delete',json=request))
+            self.assertEqual(result,{'ok':True,'deleted':2,'released':before['frozen'],'skipped':0})
+            self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=request)),
+                             {'ok':True,'deleted':0,'released':0,'skipped':0})
             self.assertEqual(client.get('/api/v1/orders/'+order).status_code,404)
             web=TestClient(self.client.app)
             try:
                 self.ok(web.post('/api/auth/login',json={'email':db.scalar('SELECT email FROM users WHERE id=$1',owner),'password':'Test-password-123'}))
                 self.assertEqual(web.get('/api/orders/'+order).status_code,404)
                 self.assertEqual(web.get('/api/subscriptions/'+order).status_code,404)
-                self.assertEqual(self.ok(web.get('/api/orders'))['total'],1)
+                self.assertEqual(self.ok(web.get('/api/orders'))['total'],0)
             finally:web.close()
             self.assertEqual(self.client.get('/api/admin/orders/'+order).status_code,404)
             self.assertEqual(self.ok(self.client.get('/api/admin/orders',params={'q':order}))['total'],0)
-            self.assertEqual(self.ok(client.get('/api/v1/orders'))['total'],1)
+            self.assertEqual(self.ok(client.get('/api/v1/orders'))['total'],0)
             overview=self.ok(client.get('/api/v1/overview'))
-            self.assertEqual(overview['stats']['orders'],1)
+            self.assertEqual(overview['stats']['orders'],0)
             self.assertNotIn(order,[r['id'] for r in overview['recent_orders']])
             self.assertEqual(client.post('/api/v1/orders',json=payload,headers=headers).status_code,409)
-            self.assertEqual(db.one('SELECT balance,frozen FROM users WHERE id=$1',owner),before)
+            self.assertEqual(db.one('SELECT balance,frozen FROM users WHERE id=$1',owner),dict(before,frozen=0))
             ledger=self.ok(client.get('/api/v1/wallet/ledger'))['items']
             self.assertTrue(any(r['kind']=='unfreeze' and r['related_order'] is None for r in ledger))
-            self.ok(self.close_fixture_order(active))
+            self.assertIsNotNone(db.scalar('SELECT deleted_at FROM orders WHERE id=$1',active))
 
-    def test_admin_delete_keeps_settled_spend_and_rejects_active_followup(self):
+    def test_admin_delete_keeps_spend_and_skips_only_running_followup(self):
         order,owner=self.paid_followup_order(keep=True)
-        db.execute("UPDATE orders SET activation='active',renewal='kept' WHERE id=$1",order)
+        db.execute("UPDATE orders SET activation='pending',renewal='pending' WHERE id=$1",order)
         before=membership_for(owner)['spent']
         funds=db.one('SELECT balance,frozen FROM users WHERE id=$1',owner)
-        payload={'ids':[order],'accepted':True}
+        payload={'ids':[order]}
         with db.transaction() as lock:
-            lock.execute('SELECT pg_advisory_xact_lock(1886011,hashtext($1))',order)
-            self.assertEqual(self.client.post('/api/admin/orders/batch-delete',json=payload).status_code,409)
-        self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=payload))['deleted'],1)
+            for key in (1886005,1886006,1886008):
+                lock.execute('SELECT pg_advisory_xact_lock($1)',key)
+            for key in (1886011,1886012):
+                lock.execute('SELECT pg_advisory_xact_lock($1,hashtext($2))',key,order)
+            self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=payload)),
+                             {'ok':True,'deleted':0,'released':0,'skipped':1})
+            self.assertIsNone(db.scalar('SELECT deleted_at FROM orders WHERE id=$1',order))
+        self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=payload)),
+                         {'ok':True,'deleted':1,'released':0,'skipped':0})
         self.assertEqual(membership_for(owner)['spent'],before)
         self.assertEqual(db.one('SELECT balance,frozen FROM users WHERE id=$1',owner),funds)
+        db.execute("UPDATE orders SET activation='active',renewal='kept' WHERE id=$1",order)
+        self.assertEqual(self.client.get('/api/admin/orders/'+order).status_code,404)
+        self.assertEqual(self.ok(self.client.post('/api/admin/orders/batch-delete',json=payload))['deleted'],0)
+
+    def test_admin_delete_all_statuses_and_concurrent_repeats(self):
+        with self.api_fixture() as (owner,client,_):
+            ids=[];states=('draft','queued','processing','awaiting_payment','review','succeeded','failed','cancelled')
+            for state in states:
+                order=self.ok(client.post('/api/v1/orders',json=self.api_payload('subscription'),headers={'Idempotency-Key':uid()}))['id']
+                db.execute('UPDATE orders SET status=$2 WHERE id=$1',order,state)
+                ids.append(order)
+            funds=db.one('SELECT balance,frozen FROM users WHERE id=$1',owner)
+            fee=db.scalar('SELECT fee FROM orders WHERE id=$1',ids[0])
+            ledger=db.all('SELECT * FROM ledger WHERE user_id=$1 ORDER BY id',owner)
+            payload={'ids':ids}
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                results=[self.ok(r) for r in pool.map(lambda _:self.client.post('/api/admin/orders/batch-delete',json=payload),range(3))]
+            self.assertEqual(sorted(r['deleted'] for r in results),[0,0,len(ids)-1])
+            self.assertEqual(sum(r['released'] for r in results),fee*(len(ids)-1))
+            self.assertTrue(all(r['skipped']==1 for r in results))
+            self.assertEqual(db.scalar('SELECT count(*) FROM orders WHERE id=ANY($1) AND deleted_at IS NOT NULL',ids),len(ids)-1)
+            self.assertIsNone(db.scalar('SELECT deleted_at FROM orders WHERE id=$1',ids[2]))
+            self.assertEqual(db.one('SELECT balance,frozen FROM users WHERE id=$1',owner),dict(funds,frozen=fee))
+            after=db.all('SELECT * FROM ledger WHERE user_id=$1 ORDER BY id',owner)
+            self.assertEqual(after[:len(ledger)],ledger)
+            self.assertEqual([r['kind'] for r in after[len(ledger):]],['unfreeze']*(len(ids)-1))
+            self.assertEqual(self.ok(client.get('/api/v1/orders'))['total'],1)
+
+    def test_admin_deleted_orders_cannot_restart_or_resume(self):
+        from backend import subscription,subscription_cslive_go,subscription_cslive_full,subscription_retry,post_payment,cslive_go_post_payment
+        from unittest.mock import patch
+        with self.api_fixture() as (owner,client,_):
+            saved_scheduler=db.scalar("SELECT value FROM settings WHERE key='scheduler'")
+            try:
+                db.execute("UPDATE settings SET value=$1 WHERE key='scheduler'",dict(saved_scheduler,paused=False))
+                for module in (subscription,subscription_cslive_go,subscription_cslive_full):
+                    with self.subTest(flow=module.FLOW):
+                        cfg=db.scalar("SELECT value FROM settings WHERE key='payment'")
+                        db.execute("UPDATE settings SET value=$1 WHERE key='payment'",dict(cfg,subscription_flow=module.FLOW))
+                        order=self.ok(client.post('/api/v1/orders',json=self.api_payload('subscription'),headers={'Idempotency-Key':uid()}))['id']
+                        result=self.ok(self.client.post('/api/admin/orders/batch-delete',json={'ids':[order]}))
+                        self.assertEqual((result['deleted'],result['skipped']),(1,0))
+                        self.assertIsNone(module.claim_subscription())
+                        db.execute("UPDATE orders SET status='processing' WHERE id=$1",order)
+                        self.assertFalse(subscription_retry.can_start(order))
+                        with self.assertRaises(RuntimeError):subscription_retry.mark_payment_submission(order)
+                        self.assertIsNone(db.scalar('SELECT payment_submit_started_at FROM subscription_runs WHERE order_id=$1',order))
+                        self.assertTrue(subscription_retry.handle_failure(order,RuntimeError('network_error')))
+                        self.assertEqual(db.scalar('SELECT network_retry_count FROM subscription_runs WHERE order_id=$1',order),0)
+                        for followup in (post_payment,cslive_go_post_payment):
+                            with patch.object(followup,'_save') as save:
+                                with self.assertRaises(followup.FollowupError):followup.resume(order)
+                                save.assert_not_called()
+            finally:db.execute("UPDATE settings SET value=$1 WHERE key='scheduler'",saved_scheduler)
 
     def test_account_membership_and_product_price_priority(self):
         with self.api_fixture() as (owner,client,_):

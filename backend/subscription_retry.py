@@ -9,9 +9,9 @@ NETWORK_ERRORS = {'timeout', 'proxy_connect', 'dns', 'connection', 'network_erro
 
 
 def can_start(order_id):
-    row = db.one('SELECT o.status,s.paid_at,s.payment_submit_started_at FROM orders o '
+    row = db.one('SELECT o.status,o.deleted_at,s.paid_at,s.payment_submit_started_at FROM orders o '
                  'JOIN subscription_runs s ON s.order_id=o.id WHERE o.id=$1', order_id)
-    if not row or row['status'] != 'processing' or row['paid_at']:
+    if not row or row['deleted_at'] is not None or row['status'] != 'processing' or row['paid_at']:
         return False
     if row['payment_submit_started_at']:
         handle_failure(order_id, RuntimeError('payment_result_unconfirmed'))
@@ -41,8 +41,8 @@ def save_checkout(order_id, flow, result, context=None):
 def mark_payment_submission(order_id):
     """Persist the fence before the first potentially chargeable request."""
     with db.transaction() as q:
-        order = q.one('SELECT status FROM orders WHERE id=$1 FOR UPDATE', order_id)
-        if not order or order['status'] != 'processing':
+        order = q.one('SELECT status,deleted_at FROM orders WHERE id=$1 FOR UPDATE', order_id)
+        if not order or order['deleted_at'] is not None or order['status'] != 'processing':
             raise RuntimeError('payment_result_unconfirmed')
         changed = q.execute('UPDATE subscription_runs SET payment_submit_started_at=now() '
                             'WHERE order_id=$1 AND payment_submit_started_at IS NULL AND paid_at IS NULL', order_id)
@@ -56,12 +56,12 @@ def handle_failure(order_id, exc):
     if re.fullmatch(r'(?:提链失败:\s*)?network_error', str(exc).strip()):
         code = 'network_error'
     with db.transaction() as q:
-        row = q.one('SELECT o.status,s.paid_at,s.payment_submit_started_at,s.network_retry_count,'
+        row = q.one('SELECT o.status,o.deleted_at,s.paid_at,s.payment_submit_started_at,s.network_retry_count,'
                     's.checkout_checkpoint_enc FROM orders o JOIN subscription_runs s ON s.order_id=o.id '
                     'WHERE o.id=$1 FOR UPDATE OF o,s', order_id)
         if not row:
             return False
-        if row['paid_at'] or row['status'] != 'processing':
+        if row['deleted_at'] is not None or row['paid_at'] or row['status'] != 'processing':
             return True
         if row['payment_submit_started_at'] and code not in {'payment_declined', 'approval_blocked'}:
             q.execute("UPDATE orders SET status='review',updated_at=now() WHERE id=$1", order_id)

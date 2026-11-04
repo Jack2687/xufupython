@@ -39,9 +39,10 @@ from backend import renewals,proxies
 from backend.seed import DEFAULTS
 from test_customer_api import CustomerApiTests
 from test_admin_order_pricing import AdminOrderPricingTests
+from test_payment_delay_settings import PaymentDelaySettingsTests
 
 
-class BackendTests(AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -1021,6 +1022,7 @@ class BackendTests(AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
         db.execute('INSERT INTO order_proxy_sessions(order_id,resource_id,endpoint_enc,expected_ip,expires_at) VALUES($1,$2,$3,$4,$5)',
                    order_id,'fixture',encrypt('http://proxy.example.test:8080'),'8.8.4.4',now()+timedelta(minutes=10))
         subscription._succeed_order(order_id,owner,0,'4242',100,'USD')
+        db.execute("UPDATE subscription_runs SET paid_at=now()-interval '10 seconds' WHERE order_id=$1",order_id)
         return order_id,owner
 
     def paid_snapshot(self, order_id, owner):
