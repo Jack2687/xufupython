@@ -26,7 +26,7 @@ from .cslive_go_prolong.stripe_checksum import build_runtime_checksums, fetch_st
 from .cslive_go_prolong.stripe_hosted import (
     StripeHostedClient, PK_FALLBACK,
     build_payment_method_form, build_confirm_form,
-    resolve_checkout_config_id, resolve_expected_amount, resolve_eid, resolve_elements_session,
+    resolve_checkout_config_id, resolve_expected_amount,
 )
 
 log = logging.getLogger('xufu.subscription_cslive_go')
@@ -516,38 +516,13 @@ def run_subscription(job: dict):
         client_session_id = str(_uuid.uuid4())
 
         guid, muid, sid = stripe.register_device_fingerprint()
-        init_resp = stripe.init(cs_id, hosted_url=hosted_url)
+        init_resp = stripe.init(cs_id)
         init_checksum = str(init_resp['init_checksum'])
-        init_eid = resolve_eid(init_resp)
-        elements_session_id = resolve_elements_session(init_resp)
+        config_id = resolve_checkout_config_id(init_resp)
 
-        # cs_live HostedPrepare（cs_live.go:6888）：init → GET 托管页 → r.stripe.com/b 预热 →
-        # tax(eid=init_eid) → Page()，逐步串起 eid 链；confirm 才会被 Stripe 当作真实提交，
-        # 而不是回显未付款的页面状态。
-        stripe.load_hosted_page(hosted_url)
-        stripe.warmup(client_session_id)
-
-        tax_resp = stripe.update_tax_region(cs_id, billing_addr, eid=init_eid)
-        tax_eid = resolve_eid(tax_resp)
+        tax_resp = stripe.update_tax_region(cs_id, billing_addr)
         expected_amount = resolve_expected_amount(tax_resp, init_resp)
         currency_from_stripe = str(tax_resp.get('currency') or init_resp.get('currency') or currency).upper()
-        if not elements_session_id:
-            elements_session_id = resolve_elements_session(tax_resp)
-
-        # rememberHostedEid(tax)（cs_live.go:7120）：Page() 用 tax 返回的 eid。
-        hosted_eid = tax_eid if tax_eid != 'NA' else 'NA'
-        page_resp = stripe.read_page(cs_id, eid=hosted_eid)
-        if not elements_session_id:
-            elements_session_id = resolve_elements_session(page_resp)
-        # config_id = FirstTruthy(tax, init, page)（cs_live.go:6952）
-        config_id = (
-            str(tax_resp.get('config_id') or '').strip()
-            or str(init_resp.get('config_id') or '').strip()
-            or str(page_resp.get('config_id') or '').strip()
-            or resolve_checkout_config_id(init_resp)
-        )
-        # confirm eid = FirstTruthy(tax_eid, init_eid, hosted_eid, "NA")（cs_live.go:7010）
-        eid = next((e for e in (tax_eid, init_eid, hosted_eid) if e and e != 'NA'), 'NA')
 
         _check_proxy_session_lifetime(order_id)
 
@@ -568,8 +543,6 @@ def run_subscription(job: dict):
             checkout_config_id=config_id,
             runtime_version=build.version,
             address=billing_addr,
-            hosted_url=hosted_url,
-            elements_session_id=elements_session_id,
         )
         pm_resp = stripe.create_payment_method(pm_form)
         pm_id = str(pm_resp['id'])
@@ -595,14 +568,11 @@ def run_subscription(job: dict):
             client_session_id=client_session_id,
             checkout_config_id=config_id,
             runtime=runtime,
-            eid=eid,
-            hosted_url=hosted_url,
-            elements_session_id=elements_session_id,
         )
         _add_event(order_id, 'confirming', '正在提交付款确认…')
         subscription_retry.mark_payment_submission(order_id)
         confirm_resp = stripe.confirm(cs_id, confirm_form)
-        log.warning('[%s] CONFIRM_DEBUG eid=%s %s', order_id, eid, _resp_debug(confirm_resp))
+        log.warning('[%s] CONFIRM_DEBUG cs=%s %s', order_id, cs_id[:28], _resp_debug(confirm_resp))
 
         def _classify(data: dict) -> tuple[bool, str, int]:
             status = str(data.get('status') or '').lower()

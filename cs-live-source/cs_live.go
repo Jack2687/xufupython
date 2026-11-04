@@ -499,10 +499,11 @@ func (p *chatgpt_Platform) Checkout(planName string, token [2]string, uiMode str
 		uiMode = "redirect"
 	}
 	path := "/backend-api/payments/checkout"
-	h, err := p.ChallengeHeaders(path, token, chatgpt_PlatformBase+"/#pricing", true)
-	if err != nil {
-		return nil, err
-	}
+	// iOS 原生客户端提链：OpenAI 对 native 客户端返回“真 hosted”结账（http 直连付款可付），
+	// 而 web 客户端会被强制为 custom(dahlia) 型长链，付款必须走浏览器 hCaptcha/3DS。
+	// 这里复用 cs_live 现成的过-Cloudflare 传输（tls_client 指纹），仅把客户端标识改成
+	// ChatGPT iOS App，并按参考实现省略 Sentinel token（原生端不要求）。
+	h := p.iosCheckoutHeaders()
 	body := protocol_O("plan_name", planName, "billing_details", protocol_O("country", p.CP.Country, "currency", p.CP.Currency), "checkout_ui_mode", uiMode, "cancel_url", chatgpt_PlatformBase+"/#pricing")
 	if uiMode != "hosted" {
 		body.Set("entry_point", "all_plans_pricing_modal")
@@ -516,6 +517,36 @@ func (p *chatgpt_Platform) Checkout(planName string, token [2]string, uiMode str
 	}
 	return p.Call("POST", path, chatgpt_PlatformCallOptions{Headers: h, Body: body})
 }
+
+// iosCheckoutHeaders 复刻参考实现(generator.py build_checkout_headers client=ios)的
+// ChatGPT iOS 原生客户端请求头。OpenAI 据此返回“真 hosted”结账而非 custom(dahlia)。
+// 仍复用 cs_live 的传输层(tls_client 过 Cloudflare)与本单设备身份/Cookie。
+func (p *chatgpt_Platform) iosCheckoutHeaders() protocol_Fields {
+	cp := p.CP
+	h := protocol_O(
+		"Authorization", "Bearer "+cp.AccessToken,
+		"Accept", "application/json",
+		"User-Agent", chatgpt_iOSUserAgent,
+		"OAI-Language", "zh-Hans",
+		"OpenAI-Client-Type", "native",
+		"OpenAI-Client-Name", "chatgpt-ios",
+		"Content-Type", "application/json",
+		"oai-device-id", cp.DeviceID,
+	)
+	if cp.Cookies != "" {
+		h.Set("Cookie", cp.Cookies)
+	}
+	if cp.AccountID != "" {
+		h.Set("ChatGPT-Account-ID", cp.AccountID)
+		h.Set("chatgpt-account-id", cp.AccountID)
+		h.Set("platform-account-id", cp.AccountID)
+	}
+	h.Set("x-openai-target-path", "/backend-api/payments/checkout")
+	h.Set("x-openai-target-route", "/backend-api/payments/checkout")
+	return h
+}
+
+const chatgpt_iOSUserAgent = "ChatGPT/1.2026.196 (iOS 18.5; iPhone17,2; build 2682191628)"
 
 func (p *chatgpt_Platform) ChallengeHeaders(path string, token [2]string, referer string, split bool) (protocol_Fields, error) {
 	h := p.Headers(path, chatgpt_PlatformHeaderOptions{Referer: referer})
