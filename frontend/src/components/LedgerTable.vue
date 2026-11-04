@@ -7,7 +7,7 @@ import RecordsTable from './RecordsTable.vue'
 const props=defineProps<{rows:Row[];loading:boolean}>()
 defineEmits<{order:[row:Row]}>()
 const q=ref(''),kind=ref(''),start=ref(''),end=ref('')
-const kinds=['topup','redeem','freeze','unfreeze','charge','refund','adjustment']
+const kinds=['topup','redeem','freeze','unfreeze','charge','refund','adjustment','invite_reward','invite_reversal']
 const invalidDates=computed(()=>!!(start.value&&end.value&&start.value>end.value))
 const hasFilters=computed(()=>!!(q.value||kind.value||start.value||end.value))
 const filtered=computed(()=>{
@@ -35,7 +35,7 @@ function ledgerDescription(row:Row){
  return String(row.description||'—').replace(/\bR\b/g,'积分')
 }
 function reset(){q.value='';kind.value='';start.value='';end.value=''}
-const source=(r:Row)=>r.related_order?'订阅订单':({topup:'人工充值',redeem:'兑换码入账',adjustment:'运营调整',refund:'服务退费',charge:'服务结算',freeze:'服务费冻结',unfreeze:'服务费解冻'} as Row)[r.kind]||'账户变动'
+const source=(r:Row)=>r.related_order?'订阅订单':({invite_reward:'伙伴计划奖励',invite_reversal:'伙伴计划退回',topup:'人工充值',redeem:'兑换码入账',adjustment:'运营调整',refund:'服务退费',charge:'服务结算',freeze:'服务费冻结',unfreeze:'服务费解冻'} as Row)[r.kind]||'账户变动'
 const columns=[{key:'kind',label:'流水类型'},{key:'source',label:'业务来源'},{key:'payment',label:'银行卡费用'},{key:'available',label:'可用变动'},{key:'frozen',label:'冻结变动'},{key:'balance',label:'变动后余额'},{key:'related',label:'关联记录',wide:true},{key:'description',label:'说明',wide:true},{key:'time',label:'发生时间'}]
 </script>
 <template>

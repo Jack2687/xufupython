@@ -2,7 +2,7 @@ import type {Row} from './lib'
 
 type State='completed'|'running'|'waiting'|'review'|'failed'|'skipped'
 type Fact={label:string;value:string}
-export type JourneyStage={id:string;title:string;state:State;result:string;facts:Fact[];events:Row[];duration:string;next:string;startedAt:string}
+export type JourneyStage={id:string;title:string;state:State;result:string;facts:Fact[];events:Row[];duration:string;next:string;startedAt:string;endedAt:string}
 type Input={order?:Row;payment?:Row;checkout?:Row;billing?:Row;events?:Row[];links?:Row[]}
 const validAmount=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0
 export function currencyAmount(amount:unknown,currency:unknown){
@@ -34,7 +34,7 @@ export function buildPaymentJourney(input:Input){
  const finish=events.filter(e=>e.phase==='complete').at(-1)
  const rounds=Math.max(0,...events.map(e=>Number(e.round)||0),...links.map(e=>Number(e.round)||0))
  const stopped=['failed','cancelled'].includes(o.status),subscription=o.workflow==='subscription'
- const stages:JourneyStage[]=[['checkout','生成结账链接'],['billing','账单与税费'],['payment','订阅付款'],['activation','核实订阅'],['renewal','自动续费设置'],['complete','办理结果']].map(([id,title])=>({id,title,state:'waiting',result:'尚未开始',facts:[],events:[],duration:'未记录',next:'',startedAt:''}))
+ const stages:JourneyStage[]=[['checkout','生成结账链接'],['billing','账单与税费'],['payment','订阅付款'],['activation','核实订阅'],['renewal','自动续费设置'],['complete','办理结果']].map(([id,title])=>({id,title,state:'waiting',result:'尚未开始',facts:[],events:[],duration:'未记录',next:'',startedAt:'',endedAt:''}))
  const stage=(id:string)=>stages.find(s=>s.id===id)!
  let context='checkout'
  for(const e of events){
@@ -115,6 +115,11 @@ export function buildPaymentJourney(input:Input){
  for(const s of activeStages){
   if((o.status==='review'||followupDone)&&s.state==='running'){s.state='waiting';s.result='阶段已结束，结果未单独记录'}
   if(stopped&&['waiting','running'].includes(s.state)){s.state='skipped';s.result=s.events.length?'流程已停止，结果未确认':'未执行'}
+  if(!['running','waiting'].includes(s.state)){
+   const phases:Record<string,string[]>={checkout:['checkout'],billing:['pricing','billing'],payment:['result','checking','verification'],activation:['activation'],renewal:['renewal'],complete:['complete']}
+   const terminal=s.events.filter(e=>phases[s.id].includes(e.phase)&&['completed','failed','review','skipped'].includes(e.state)&&(s.id==='billing'?e.phase==='pricing':!e.http_status)).at(-1)
+   if(terminal&&time(terminal.created_at)!==null)s.endedAt=terminal.created_at
+  }
   if(['failed','review'].includes(s.state)){
    const last=[...s.events].reverse().find(e=>['failed','review'].includes(e.state)&&e.description&&e.code!=='subscription_absent')
    if(last)fact(s.id,'最近异常',last.description)

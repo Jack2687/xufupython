@@ -11,6 +11,7 @@ TIERS = [
     {'code':'L9','name':'合作伙伴','threshold':10000000,'discount':20,'description':'服务费减免 80%'},
 ]
 DEFAULTS = {
+    'invites': {'enabled':True,'rate_percent':5},
     'site': {'name':'序付','english_name':'XUPAY','tagline':'让每一笔订阅，清晰有序。','registration_open':True,'support_url':'','terms':'请仅提交本人或已获授权的账号与银行卡。服务费与上游订阅费用分别结算，订单处理结果以订单记录为准。','billing_country':'US','billing_mode':'customer_review','invite_rate':0},
     'risk': {'login_per_minute':10,'api_per_minute':120,'order_per_minute':5,'max_open_orders':10,'max_topup':10000000,'session_hours':24,'event_retention_days':90},
     'scheduler': {'paused':False,'max_parallel':2,'per_user_parallel':1,'retry_limit':2,'retry_delay_seconds':30,'task_timeout_seconds':180,'queue_limit':500,'default_country':'PH','link_mode':'long','engine':'not_connected'},

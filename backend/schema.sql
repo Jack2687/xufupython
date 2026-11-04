@@ -216,6 +216,39 @@ BEGIN
  END IF;
  RETURN NEW;
 END $$;
+
+-- Only new admissions participate. Reinitialization never backfills old orders.
+CREATE TABLE IF NOT EXISTS invitation_candidates (
+ order_id text PRIMARY KEY REFERENCES orders(id),invitee_id text NOT NULL REFERENCES users(id),
+ inviter_id text NOT NULL REFERENCES users(id),rate_percent int NOT NULL CHECK(rate_percent BETWEEN 1 AND 30),
+ created_at timestamptz NOT NULL DEFAULT now(),CHECK(inviter_id<>invitee_id)
+);
+CREATE TABLE IF NOT EXISTS invitation_rewards (
+ invitee_id text PRIMARY KEY REFERENCES users(id),inviter_id text NOT NULL REFERENCES users(id),
+ order_id text UNIQUE NOT NULL REFERENCES orders(id),rate_percent int NOT NULL CHECK(rate_percent BETWEEN 1 AND 30),
+ fee bigint NOT NULL CHECK(fee>=0),granted bigint NOT NULL CHECK(granted>=0),
+ entitled bigint NOT NULL CHECK(entitled>=0 AND entitled<=granted),recovered bigint NOT NULL DEFAULT 0 CHECK(recovered>=0 AND recovered<=granted),
+ created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),CHECK(inviter_id<>invitee_id)
+);
+CREATE INDEX IF NOT EXISTS invitation_reward_owner ON invitation_rewards(inviter_id);
+CREATE OR REPLACE FUNCTION snapshot_invitation() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE inviter text; rules jsonb;
+BEGIN
+ IF NEW.workflow<>'subscription' THEN RETURN NEW; END IF;
+ SELECT value INTO rules FROM settings WHERE key='invites';
+ IF rules->>'enabled' IS DISTINCT FROM 'true' THEN RETURN NEW; END IF;
+ SELECT invited_by INTO inviter FROM users WHERE id=NEW.user_id;
+ IF inviter IS NOT NULL AND inviter<>NEW.user_id THEN
+  INSERT INTO invitation_candidates(order_id,invitee_id,inviter_id,rate_percent)
+  VALUES(NEW.id,NEW.user_id,inviter,(rules->>'rate_percent')::int) ON CONFLICT DO NOTHING;
+ END IF;
+ RETURN NEW;
+END $$;
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='invitation_admission' AND tgrelid='orders'::regclass) THEN
+  CREATE TRIGGER invitation_admission AFTER INSERT ON orders FOR EACH ROW EXECUTE FUNCTION snapshot_invitation();
+ END IF;
+END $$;
 DO $$
 DECLARE table_name text;
 BEGIN

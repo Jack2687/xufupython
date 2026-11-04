@@ -14,7 +14,7 @@ from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
-from . import customer_api, admin_orders, order_updates
+from . import customer_api, admin_orders, order_updates, invitations
 from .request_origin import configured_origin, origin_allowed
 
 PUBLIC_ORIGIN = configured_origin(os.getenv('PUBLIC_ORIGIN', ''))
@@ -30,6 +30,8 @@ HEADERS={
 
 
 def maintenance():
+    try:invitations.settle()
+    except Exception as e:log.error('Invitation settlement will retry (%s)',type(e).__name__)
     with db.transaction() as q:
         for table in ('sessions','rate_buckets','blocked_ips','proxy_leases'):
             q.execute('DELETE FROM '+table+' WHERE expires_at<now()')
@@ -119,7 +121,7 @@ async def security(request:Request,call_next):
 
 
 for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)
-for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router,order_updates.router):app.include_router(router)
+for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router,order_updates.router,invitations.router):app.include_router(router)
 
 
 @app.get('/health/live')

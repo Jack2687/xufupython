@@ -1,0 +1,20 @@
+<script setup lang="ts">
+import {ref,onMounted} from 'vue'
+import {Search,RefreshCw} from 'lucide-vue-next'
+import {api,cash,date,notify,type Row} from '../lib'
+import DataTable from './DataTable.vue'
+const data=ref<Row>({items:[],stats:{}}),rules=ref<Row>({enabled:true,rate_percent:5}),page=ref(1),search=ref(''),busy=ref(false),saving=ref(false),error=ref('')
+const states:Row={waiting:'待满足条件',rewarded:'已结算',adjusted:'部分退回',reversed:'已撤回',recovering:'待扣回'}
+async function load(initial=false){busy.value=true;error.value='';try{data.value=await api(`/admin/invites?page=${page.value}&q=${encodeURIComponent(search.value)}`);if(initial)rules.value={...data.value.rules}}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+async function save(){saving.value=true;try{await api('/admin/settings/invites','PUT',rules.value);notify('奖励规则已保存，仅影响新建订单');await load(true)}catch(e){notify((e as Error).message)}finally{saving.value=false}}
+onMounted(()=>load(true))
+</script>
+<template>
+ <div v-if="error" class="alert danger">{{error}}<button @click="load()">重试</button></div>
+ <form class="panel invitation-rules" @submit.prevent="save"><div><h2>伙伴奖励规则</h2><p>只奖励直接邀请伙伴的首笔成功订阅，按实际结算服务费计算，每位被邀请人限一次。</p></div><label class="checkbox-label"><input v-model="rules.enabled" type="checkbox"/>开放邀请奖励</label><label>奖励比例（%）<input v-model.number="rules.rate_percent" type="number" min="1" max="30" step="1" required/></label><button class="btn primary" :disabled="saving">{{saving?'保存中…':'保存规则'}}</button><p class="rules-note">比例可设 1%～30%，下单时锁定；关闭仅影响新建订单，已符合条件的订单继续结算。历史订单不补发，退款按比例撤回。可用余额不足的奖励保留待扣回，不占用冻结服务费。通常一分钟内自动结算。</p></form>
+ <div class="stats-grid four"><article class="stat" v-for="s in [{k:'invited',n:'邀请关系',u:'位'},{k:'qualified',n:'已结算首单',u:'笔'},{k:'earned',n:'有效奖励',u:'积分',money:true},{k:'pending_recovery',n:'待扣回奖励',u:'积分',money:true}]" :key="s.k"><div class="stat-label">{{s.n}}</div><strong>{{s.money?cash(data.stats[s.k]):data.stats[s.k]||0}}<small>{{s.u}}</small></strong></article></div>
+ <form class="filter-strip" @submit.prevent="page=1;load()"><div class="search-box"><Search :size="16"/><input v-model="search" maxlength="100" placeholder="邀请人或被邀请人邮箱" aria-label="搜索邀请关系"/></div><button class="btn secondary" :disabled="busy">搜索</button><button type="button" class="icon-btn bordered" :disabled="busy" aria-label="刷新邀请记录" @click="load()"><RefreshCw :size="16" :class="{spinning:busy}"/></button><span class="muted">{{search?'以下统计为搜索结果':'全部邀请关系'}}</span></form>
+ <div class="panel"><DataTable :rows="data.items" :searchable="false" hide-pagination :page-size="25" :columns="[{key:'inviter',label:'邀请人'},{key:'email',label:'被邀请人'},{key:'created_at',label:'注册时间'},{key:'reward_state',label:'奖励状态'},{key:'fee',label:'首单实际服务费'},{key:'rate_percent',label:'锁定比例'},{key:'entitled',label:'有效奖励'},{key:'recovered',label:'已扣回'},{key:'rewarded_at',label:'结算时间'}]"><template #created_at="{row}">{{date(row.created_at)}}</template><template #reward_state="{row}"><span class="badge" :class="row.reward_state==='recovering'?'amber':''">{{states[row.reward_state]}}</span></template><template #rate_percent="{row}">{{row.rate_percent==null?'—':row.rate_percent+'%'}}</template><template v-for="field in ['fee','entitled','recovered']" #[field]="{row}">{{row[field]==null?'—':cash(row[field])+' 积分'}}</template><template #rewarded_at="{row}">{{date(row.rewarded_at)}}</template></DataTable></div>
+ <div class="pagination"><span>共 {{data.total||0}} 位 · 每页 25 位</span><div><button class="btn secondary" :disabled="page===1||busy" @click="page--;load()">上一页</button><span>{{page}}</span><button class="btn secondary" :disabled="!data.has_more||busy" @click="page++;load()">下一页</button></div></div>
+</template>
+<style scoped>.invitation-rules{padding:24px;margin-bottom:24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}.invitation-rules>div{flex:1;min-width:240px}.invitation-rules h2{font-size:16px;margin:0 0 8px}.invitation-rules p{font-size:12px;color:#718492;line-height:1.8;margin:0}.invitation-rules input[type=number]{width:100px}.invitation-rules .rules-note{width:100%;border-top:1px solid #edf1f4;padding-top:16px}</style>

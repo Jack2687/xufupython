@@ -4832,7 +4832,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "流水类型，例如 topup、redeem、freeze、unfreeze、charge、refund。"
+            "description": "流水类型：topup 人工充值、redeem 兑换入账、freeze 服务费冻结、unfreeze 解冻、charge 服务费结算、refund 服务费退款、adjustment 人工调整、invite_reward 邀请奖励、invite_reversal 邀请奖励退回。"
           },
           "amount": {
             "type": "integer",

@@ -137,4 +137,5 @@ def revoke_key(id: str,request: Request):
 
 @router.get('/invites')
 def invites(request: Request):
-    return {'items':db.all("SELECT substring(email from 1 for 2)||'***@'||split_part(email,'@',2) AS email,created_at FROM users WHERE invited_by=$1 ORDER BY created_at DESC",current(request)['id'])}
+    from .invitations import listing
+    return listing(request, current(request)['id'])

@@ -27,3 +27,10 @@
 
 .spinning{animation:xufu-spin 1s linear infinite}@keyframes xufu-spin{to{transform:rotate(360deg)}}.live-status{font-size:12px;color:#607f77;display:flex;gap:12px;align-items:center}
 @media(prefers-reduced-motion:reduce){.spinning{animation-duration:2.5s}}
+
+/* Hide vertical chrome without changing scroll, focus or keyboard behavior. */
+*::-webkit-scrollbar{width:0;height:6px}
+*::-webkit-scrollbar-thumb{background:#cbd5df;border-radius:8px}
+@supports not selector(::-webkit-scrollbar){*{scrollbar-width:none!important}}
+/* Chromium supports separate axes only through its scrollbar pseudo element. */
+@supports selector(::-webkit-scrollbar){*{scrollbar-width:auto!important}}

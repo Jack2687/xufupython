@@ -116,3 +116,19 @@ test('official verification is actionable and does not imply another charge',()=
  const data=base();data.order={...data.order,status:'review',activation:'not_checked',renewal:'not_started'};data.payment.state='action_required'
  const j=buildPaymentJourney(data);assert.match(stage(j,'payment').next,/原订单/);assert.equal(stage(j,'payment').state,'review')
 })
+
+test('stage dates are terminal evidence, not admission, funds or HTTP-only confirmations',()=>{
+ const data=base();data.events=[event('billing','completed',{code:'billing_selected',created_at:'2026-11-04T09:00:00Z'}),
+ event('pricing','completed',{http_status:200,created_at:'2026-11-04T09:00:20Z'}),
+ event('funds','completed',{created_at:'2026-11-04T09:00:00Z'}),
+ event('activation','completed',{http_status:200,created_at:'2026-11-04T09:00:30Z'}),
+ event('activation','completed',{code:'activation_confirmed',created_at:'2026-11-04T09:00:31Z'}),
+ event('complete','completed',{created_at:'2026-11-04T09:00:40Z'})]
+ const j=buildPaymentJourney(data)
+ assert.equal(stage(j,'billing').endedAt,'2026-11-04T09:00:20Z')
+ assert.equal(stage(j,'activation').endedAt,'2026-11-04T09:00:31Z')
+ assert.equal(stage(j,'complete').endedAt,'2026-11-04T09:00:40Z')
+ assert.equal(stage(j,'renewal').endedAt,'')
+ data.order.activation='pending';data.order.renewal='pending';data.events=[]
+ assert.equal(stage(buildPaymentJourney(data),'activation').endedAt,'')
+})

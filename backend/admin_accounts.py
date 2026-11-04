@@ -183,6 +183,9 @@ async def batch_codes(request: Request):
         result={'ok':True}
         if action=='export':
             result={'codes':[decrypt(x['code_enc']) for x in q.all("SELECT code_enc FROM redeem_codes WHERE id=ANY($1) AND status='active' AND expires_at>now() ORDER BY created_at,id",ids)]}
+        elif action=='copy':
+            ids=list(dict.fromkeys(ids))
+            result={'codes':[decrypt(x['code_enc']) for x in q.all("SELECT code_enc FROM redeem_codes WHERE id=ANY($1) ORDER BY array_position($1::text[],id)",ids)]}
         elif action=='disable':
             result={'updated':q.execute("UPDATE redeem_codes SET status='disabled' WHERE id=ANY($1) AND status='active'",ids)}
         elif action=='delete':
