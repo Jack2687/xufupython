@@ -1,5 +1,7 @@
 # gener 流程的 Go 付款后续
 
+2026-11-04 当前实现：共用 Go 收尾程序在确认付款成功后、访问商户回跳页面前，主动刷新一轮 Session 并保存刷新结果。调用现有 `Refresh()`，空 Token 或刷新响应带错误时，沿用后台 `payment.post_refresh_retries` 与 `payment.post_refresh_interval_seconds` 的有限重试；不新增配置、不改配置值。原有订阅查询遇 401 刷新、关闭续费前刷新继续保留。刷新或保存失败则停止收尾并留待核实，不重新付款。下面的首次实现和发布记录为历史说明。
+
 2026-11-03 最新状态：以下 Go 实现已随 `4a72671` 推送并发布。之后用户要求仅在本地删除另一条 `cslive_direct_pay` 流程，现已移除其 Python 付款后分支；gener 的 Go 程序、适配器和共享进度保存保留，独立取消续费也保留。下文为该 Go 实现首次完成时的历史说明与验证；本次删除范围见 `remove-cslive-direct.md`。
 
 2026-11-03 用户授权：仅将 `gener_direct_pay` 的付款成功后续拆成独立 Go 程序，显示名改为 `gener提链+http直连付款流程 +Go付款成功后续`。不处理旧订单迁移，不修改 `cslive_direct_pay`，本次不发布 GitHub 或正式环境。
@@ -10,7 +12,7 @@ gener 原有提链、HTTP 付款、套餐长短链、后台账单随机抽取、
 
 Go 从本地参考 `xupay/internal/cslive` 中提取付款后函数和必要依赖，来源、选择范围及哈希见 `go-post-payment/SOURCE.json`。`finishPayment`、`confirmActivation`、`disableRenewal` 保留参考实现：
 
-1. 访问经过本单校验的商户回跳地址。
+1. 主动刷新一轮 Session，按后台配置处理重试与间隔；成功并保存后，访问经过本单校验的商户回跳地址。
 2. 查询订阅是否生效，明确返回 401 时刷新 Session 后重查。生效轮询最多 5 轮，轮间 2 秒。
 3. 用户保留自动续费则完成；否则主动刷新 Session，再查询续费状态。
 4. 已关闭则直接完成；明确开启才提交取消，随后复查是否关闭。状态未知不提交。

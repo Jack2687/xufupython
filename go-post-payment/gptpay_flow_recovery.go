@@ -18,6 +18,14 @@ func (t *gptpay_transaction) confirmActivation() error {
 	if e := t.save("activation"); e != nil {
 		return e
 	}
+	// Use the configured refresh retries before both the return page and the
+	// first subscription query. Persist the refreshed state before continuing.
+	if e := t.platform.Refresh(); e != nil {
+		return e
+	}
+	if e := t.save(""); e != nil {
+		return e
+	}
 	if cp.ReturnURL != "" {
 		u, e := chatgpt_ValidateReturnURL(cp.ReturnURL, cp)
 		if e == nil {
