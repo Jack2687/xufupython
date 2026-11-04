@@ -401,29 +401,6 @@ func (p *chatgpt_Platform) Call(method, path string, options ...chatgpt_Platform
 }
 
 func (p *chatgpt_Platform) Refresh() error {
-	// 付款成功的瞬间，OpenAI 会轮换账号会话，/api/auth/session?refresh=true 可能短暂
-	// 返回不含 accessToken 的 200；稍后重试即可拿到带新套餐的令牌。故对“空令牌”这类
-	// 可恢复情况做有限次重试+等待；session_token 缺失或账号不符属不可恢复，立即返回。
-	var last error
-	for attempt := 0; attempt < 4; attempt++ {
-		if attempt > 0 {
-			if e := p.HTTP.Pause(3); e != nil {
-				return e
-			}
-		}
-		e := p.refreshOnce()
-		if e == nil {
-			return nil
-		}
-		last = e
-		if protocol_FlowErrorCode(e) != "session_expired" {
-			return e
-		}
-	}
-	return last
-}
-
-func (p *chatgpt_Platform) refreshOnce() error {
 	cp := p.CP
 	if cp.SessionToken == "" {
 		return &protocol_ProtocolError{Code: "session_token_required"}

@@ -16,7 +16,7 @@ DEFAULTS = {
     'scheduler': {'paused':False,'max_parallel':2,'per_user_parallel':1,'retry_limit':2,'retry_delay_seconds':30,'task_timeout_seconds':180,'queue_limit':500,'default_country':'PH','link_mode':'long','engine':'not_connected'},
     'billing': {'country':'US','allow_customer_edit':True,'address_templates':[]},
     'proxy': {'default_id':'','global_id':'','match_country':True,'request_timeout_seconds':60},
-    'payment': {'enabled':True,'subscription_flow':'','checkout_type':'hosted','checkout_types':{'pro5x':'hosted','pro':'hosted','team':'oaics','team_premium':'oaics','plus':'oaics','go':'oaics'},'max_parallel':2,'per_user_parallel':1,'prepare_timeout_seconds':120,'quote_timeout_seconds':180,'result_timeout_seconds':120,'requests_per_minute':3,'subscription_wait_seconds':600,'renewal_check_interval_seconds':30,'renewal_check_limit':10,'network_restart_limit':2,'activation_check_interval_seconds':5,'activation_check_limit':12},
+    'payment': {'enabled':True,'subscription_flow':'','checkout_type':'hosted','checkout_types':{'pro5x':'hosted','pro':'hosted','team':'oaics','team_premium':'oaics','plus':'oaics','go':'oaics'},'max_parallel':2,'per_user_parallel':1,'prepare_timeout_seconds':120,'quote_timeout_seconds':180,'result_timeout_seconds':120,'requests_per_minute':3,'subscription_wait_seconds':600,'renewal_check_interval_seconds':30,'renewal_check_limit':10,'network_restart_limit':2,'activation_check_interval_seconds':5,'activation_check_limit':12,'post_refresh_retries':4,'post_refresh_interval_seconds':3},
     'tiers': {'items':TIERS},
 }
 

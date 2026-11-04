@@ -390,32 +390,6 @@ def _succeed_order(order_id: str, user_id: str, fee: int, last4: str, charged_am
 
 
 @trace.order_run
-def _resp_debug(data: dict) -> str:
-    """付款响应安全摘要（仅结构/状态，不含卡号、令牌等敏感信息）。用于诊断 confirm 是否被升级为人机验证。"""
-    if not isinstance(data, dict):
-        return f'non-dict:{type(data).__name__}'
-    sa = data.get('submission_attempt') if isinstance(data.get('submission_attempt'), dict) else {}
-    pi = data.get('payment_intent') if isinstance(data.get('payment_intent'), dict) else {}
-    if not pi and isinstance(sa.get('payment_intent'), dict):
-        pi = sa['payment_intent']
-    na = pi.get('next_action') if isinstance(pi.get('next_action'), dict) else {}
-    err = pi.get('last_payment_error') if isinstance(pi.get('last_payment_error'), dict) else (data.get('error') or {})
-    cid = str(data.get('id') or '')
-    parts = [
-        f"object={data.get('object')}",
-        f"id_prefix={cid.split('_')[0] + '_' if '_' in cid else cid[:6]}",
-        f"status={data.get('status')}",
-        f"payment_status={data.get('payment_status')}",
-        f"sa_state={sa.get('state') or sa.get('status')}",
-        f"sa_type={sa.get('type')}",
-        f"pi_status={pi.get('status')}",
-        f"next_action={na.get('type')}",
-        f"err_code={(err or {}).get('code') or (err or {}).get('decline_code')}",
-        f"keys={sorted(data.keys())[:30]}",
-    ]
-    return ' '.join(parts)
-
-
 def run_subscription(job: dict):
     order_id = job['id']
     if not subscription_retry.can_start(order_id):
@@ -572,7 +546,6 @@ def run_subscription(job: dict):
         _add_event(order_id, 'confirming', '正在提交付款确认…')
         subscription_retry.mark_payment_submission(order_id)
         confirm_resp = stripe.confirm(cs_id, confirm_form)
-        log.warning('[%s] CONFIRM_DEBUG cs=%s %s', order_id, cs_id[:28], _resp_debug(confirm_resp))
 
         def _classify(data: dict) -> tuple[bool, str, int]:
             status = str(data.get('status') or '').lower()
@@ -652,7 +625,6 @@ def run_subscription(job: dict):
                     )
                     if poll.status_code == 200:
                         poll_data = poll.json()
-                        log.warning('[%s] POLL_DEBUG %s', order_id, _resp_debug(poll_data))
                         paid, decline_code, charged_minor = _classify(poll_data)
                         if paid:
                             break

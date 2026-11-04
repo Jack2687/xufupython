@@ -79,6 +79,9 @@ type input struct {
 	State          state     `json:"state"`
 	Proxy          string    `json:"proxy"`
 	ProxyExpiresAt time.Time `json:"proxy_expires_at"`
+	// 付款后 session 刷新的可配置重试次数与间隔（秒）；0 表示用默认。
+	RefreshRetries  int     `json:"refresh_retries"`
+	RefreshInterval float64 `json:"refresh_interval_seconds"`
 }
 type wire struct {
 	in  *bufio.Scanner
@@ -323,6 +326,12 @@ func run(in input, w *wire) error {
 		return nil
 	}
 	platform := chatgpt_NewPlatform(transport, cp, fingerprint_Clock{})
+	if in.RefreshRetries > 0 {
+		platform.RefreshRetries = in.RefreshRetries
+	}
+	if in.RefreshInterval > 0 {
+		platform.RefreshInterval = in.RefreshInterval
+	}
 	tx := &gptpay_transaction{cp: cp, http: transport, platform: platform, progress: &progress{observer: observer}, saveFn: w.checkpoint}
 	if in.Operation == "refresh" {
 		err = platform.Refresh()

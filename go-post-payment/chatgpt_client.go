@@ -16,6 +16,9 @@ type chatgpt_Platform struct {
 	HTTP      protocol_HTTPTransport
 	CP        *model_Checkpoint
 	Clock     fingerprint_Clock
+	// 付款成功瞬间 OpenAI 会轮换会话，刷新可能短暂返回空令牌；以下为可配置的重试次数与间隔。
+	RefreshRetries  int
+	RefreshInterval float64
 }
 
 type chatgpt_PlatformHeaderOptions struct{ Referer, Mode string }
@@ -36,7 +39,8 @@ func chatgpt_NewPlatform(transport protocol_HTTPTransport, cp *model_Checkpoint,
 	if _, exists := cp.Metadata["session_id"]; !exists {
 		cp.Metadata["session_id"] = protocol_RandomUUID()
 	}
-	return &chatgpt_Platform{HTTP: transport, CP: cp, Clock: clock, Profile: protocol_DefaultBrowserProfile()}
+	return &chatgpt_Platform{HTTP: transport, CP: cp, Clock: clock, Profile: protocol_DefaultBrowserProfile(),
+		RefreshRetries: 4, RefreshInterval: 3}
 }
 
 func chatgpt_Observation() string {
@@ -138,6 +142,33 @@ func (p *chatgpt_Platform) Call(method, path string, options ...chatgpt_Platform
 }
 
 func (p *chatgpt_Platform) Refresh() error {
+	// 付款成功瞬间 OpenAI 轮换会话，/api/auth/session?refresh=true 可能短暂返回不含
+	// accessToken 的 200；对该可恢复情况按配置做有限次重试+等待。session_token 缺失或
+	// 账号不符属不可恢复，立即返回。重试次数/间隔由 Python 侧付款配置传入。
+	attempts := p.RefreshRetries
+	if attempts < 1 {
+		attempts = 1
+	}
+	var last error
+	for i := 0; i < attempts; i++ {
+		if i > 0 && p.RefreshInterval > 0 {
+			if e := p.HTTP.Pause(p.RefreshInterval); e != nil {
+				return e
+			}
+		}
+		e := p.refreshOnce()
+		if e == nil {
+			return nil
+		}
+		last = e
+		if protocol_FlowErrorCode(e) != "session_expired" {
+			return e
+		}
+	}
+	return last
+}
+
+func (p *chatgpt_Platform) refreshOnce() error {
 	cp := p.CP
 	if cp.SessionToken == "" {
 		return &protocol_ProtocolError{Code: "session_token_required"}

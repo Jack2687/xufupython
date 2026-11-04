@@ -27,7 +27,7 @@ import threading
 import time
 
 from . import db, payment_trace as trace
-from .common import decrypt, encrypt, now
+from .common import config, decrypt, encrypt, now
 from .egress import connect_via_local, local_proxy
 from .order_http_context import OrderHTTPContext
 from .renewals import COOKIE_NAME
@@ -310,7 +310,9 @@ def execute(cp, save, *, operation='finish'):
     budget = min(240, remaining) + 10
     with proxy_route(cp['proxy_endpoint']) as endpoint:
         payload = {'operation': operation, 'state': cp, 'proxy': endpoint,
-                   'proxy_expires_at': cp['proxy_expires_at']}
+                   'proxy_expires_at': cp['proxy_expires_at'],
+                   'refresh_retries': int(cp.get('refresh_retries') or 0),
+                   'refresh_interval_seconds': float(cp.get('refresh_interval_seconds') or 0)}
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         process = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL, cwd=ROOT, creationflags=flags)
@@ -424,6 +426,9 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=N
             cp['executor'] = executor
             _save(order_id, cp)
         cp['executor'] = executor
+        pcfg = config('payment')
+        cp['refresh_retries'] = pcfg.get('post_refresh_retries', 4)
+        cp['refresh_interval_seconds'] = pcfg.get('post_refresh_interval_seconds', 3)
         with trace.scope(order_id, row['trace_round']):
             try:
                 if (cp['proxy_endpoint'] != endpoint
