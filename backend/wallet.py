@@ -17,7 +17,7 @@ LEDGER_QUERY="""WITH history AS (
  CASE WHEN l.previous_frozen IS NOT NULL THEN l.frozen_after-l.previous_frozen
  WHEN l.kind='freeze' THEN o.fee WHEN l.kind='unfreeze' THEN -o.fee
  WHEN l.kind='charge' AND l.reference LIKE 'payment:%' THEN l.amount ELSE 0 END AS frozen_delta,
- CASE WHEN o.id IS NULL THEN NULL ELSE jsonb_build_object('id',o.id,'product_name',o.product_name,'email',o.email,'country',o.country,'fee',o.fee,'price_snapshot',o.price_snapshot) END AS related_order,
+ CASE WHEN o.id IS NULL OR o.deleted_at IS NOT NULL THEN NULL ELSE jsonb_build_object('id',o.id,'product_name',o.product_name,'email',o.email,'country',o.country,'fee',o.fee,'price_snapshot',o.price_snapshot) END AS related_order,
  '{}'::jsonb AS payment FROM recent l LEFT JOIN orders o ON o.id=l.order_id AND o.user_id=$1 ORDER BY l.id DESC"""
 
 

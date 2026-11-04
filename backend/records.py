@@ -2,7 +2,8 @@
 from fastapi import APIRouter, Depends, Query, Request
 from . import db
 from .common import *
-from .membership import membership_for,fee_for
+from .membership import membership_for,fee_for,fee_source
+from .product_ids import public_id, public_order
 from .runtime import order_workflows, queue_message, worker_mode
 from . import payment_trace
 
@@ -15,7 +16,7 @@ ANN="SELECT id,title,body,tone FROM announcements WHERE published AND (starts_at
 
 def _order_history(id, technical=False):
     events=db.all('SELECT id,stage,message,created_at FROM order_events WHERE order_id=$1 ORDER BY id',id)
-    labels={'network_retry':'等待网络重试','checkout_reused':'复用原结账链接','payment_review':'付款结果待核实','queued':'排队受理','processing':'开始办理','network_check':'检查代理出口',
+    labels={'admin_closed':'管理员关闭订单','network_retry':'等待网络重试','checkout_reused':'复用原结账链接','payment_review':'付款结果待核实','queued':'排队受理','processing':'开始办理','network_check':'检查代理出口',
             'network_verified':'记录代理出口','checkout':'生成结账链接','checkout_done':'结账链接已生成',
             'awaiting_payment':'等待用户付款','payment':'开始付款','confirming':'提交付款确认',
             'approving':'商户批准','failed':'办理失败','payment_succeeded':'付款成功',
@@ -64,9 +65,9 @@ def public():
 @router.get('/overview')
 def overview(request:Request):
     user=current(request)
-    stats=db.one("SELECT count(*) AS orders,count(*) FILTER(WHERE status='succeeded') AS succeeded,count(*) FILTER(WHERE status IN ('draft','queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS pending FROM orders WHERE user_id=$1",user['id'])
+    stats=db.one("SELECT count(*) AS orders,count(*) FILTER(WHERE status='succeeded') AS succeeded,count(*) FILTER(WHERE status IN ('draft','queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS pending FROM orders WHERE user_id=$1 AND deleted_at IS NULL",user['id'])
     stats.update(db.one("SELECT COALESCE(sum(-amount) FILTER(WHERE kind='charge'),0) AS used,COALESCE(sum(amount) FILTER(WHERE kind IN ('topup','redeem')),0) AS credited FROM ledger WHERE user_id=$1",user['id']))
-    return {'user':user,'stats':stats,'recent_orders':db.all('SELECT '+ORDER_FIELDS+' FROM orders o WHERE user_id=$1 ORDER BY created_at DESC LIMIT 5',user['id']),'announcements':db.all(ANN+' ORDER BY sort,created_at DESC')}
+    return {'user':user,'stats':stats,'recent_orders':db.all('SELECT '+ORDER_FIELDS+' FROM orders o WHERE user_id=$1 AND o.deleted_at IS NULL ORDER BY created_at DESC LIMIT 5',user['id']),'announcements':db.all(ANN+' ORDER BY sort,created_at DESC')}
 
 
 @router.get('/orders')
@@ -74,11 +75,12 @@ def overview(request:Request):
 def orders(request:Request,q:str='',status:str='',workflow:str='',page:int=Query(1,ge=1,le=100000),page_size:int=Query(200,ge=1,le=200)):
     require(status in ('','draft','queued','processing','awaiting_payment','succeeded','failed','cancelled','review'),'订单状态无效')
     require(workflow in ('','link','subscription') and len(q)<=200,'订单筛选参数无效')
-    where=" FROM orders o WHERE user_id=$1 AND ($2='' OR email ILIKE '%'||$2||'%' OR id ILIKE '%'||$2||'%') AND ($3='' OR status=$3) AND ($4='' OR workflow=$4)"
+    where=" FROM orders o WHERE user_id=$1 AND o.deleted_at IS NULL AND ($2='' OR email ILIKE '%'||$2||'%' OR id ILIKE '%'||$2||'%') AND ($3='' OR status=$3) AND ($4='' OR workflow=$4)"
     args=(current(request)['id'],q,status,workflow)
     rows=db.all('SELECT '+ORDER_FIELDS+where+' ORDER BY created_at DESC,id DESC LIMIT $5 OFFSET $6',*args,page_size,(page-1)*page_size)
     for r in rows:
         r['payment']=_order_list_payment(r)
+        public_order(r,request)
     total=db.scalar('SELECT count(*)'+where,*args)
     return {'items':rows,'page':page,'page_size':page_size,'total':total,'has_more':page*page_size<total}
 
@@ -86,7 +88,7 @@ def orders(request:Request,q:str='',status:str='',workflow:str='',page:int=Query
 @router.get('/orders/{id}')
 @router.get('/v1/orders/{id}')
 def order_detail(id:str,request:Request):
-    row=db.one('SELECT '+ORDER_FIELDS+' FROM orders o WHERE id=$1 AND user_id=$2',id,current(request)['id'])
+    row=db.one('SELECT '+ORDER_FIELDS+' FROM orders o WHERE id=$1 AND user_id=$2 AND o.deleted_at IS NULL',id,current(request)['id'])
     require(row,'订单不存在',404)
     if row['status']=='queued':row['queue_message']=queue_message(row.get('workflow'))
     payment={};checkout={}
@@ -104,6 +106,7 @@ def order_detail(id:str,request:Request):
                 if row['status']=='succeeded':fee_state='charged'
                 elif row['status'] in ('queued','processing','review'):fee_state='held'
                 payment={'state':_payment_state(row),'last4':sr.get('payment_last4') or '','amount':sr.get('payment_amount'),'currency':sr.get('payment_currency') or '','fee_state':fee_state,'charged_amount':sr.get('payment_amount') if sr.get('payment_last4') else None,'charged_currency':sr.get('payment_currency') or '','message':_payment_message(row),'enabled':False}
+    public_order(row,request)
     return {'order':row,**_order_history(id),'checkout':checkout,'payment':payment}
 
 
@@ -123,6 +126,7 @@ def _payment_message(row):
     if s=='succeeded':return '付款成功，服务费已结算。'
     if s=='processing':return '正在办理中，请稍候。'
     if s=='failed':return '办理未完成，服务费已解冻。'
+    if s=='cancelled':return '订单已关闭，冻结服务费已释放。'
     if s=='queued':return '已排队，等待处理。'
     if s=='review':return '付款结果尚未确认，已停止重复提交，请核实结果。'
     return ''
@@ -143,7 +147,8 @@ def _order_list_payment(row):
 @router.get('/v1/catalog')
 def catalog(request:Request):
     m=membership_for(current(request)['id']);products=db.all('SELECT id,name,description,fee,features,tag FROM products WHERE enabled ORDER BY sort')
-    for p in products: p['member_fee']=fee_for(m,p['fee'])
+    for p in products:
+        p['member_fee']=fee_for(m,p['fee'],p['id']);p['price_source']=fee_source(m,p['id']);p['id']=public_id(p['id'])
     countries=[{'code':code,'name':name,'currency':currency} for code,name,currency in [('PH','菲律宾','PHP'),('US','美国','USD'),('JP','日本','JPY'),('SG','新加坡','SGD'),('GB','英国','GBP'),('EG','埃及','EGP'),('TR','土耳其','TRY')]]
     cfg=config('payment')
     return {'items':products,'membership':m,'unit':'cent_R','countries':countries,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')}
@@ -151,24 +156,27 @@ def catalog(request:Request):
 
 @admin_router.get('/overview')
 def admin_overview():
-    stats=db.one("SELECT (SELECT count(*) FROM users WHERE role='member') AS customers,(SELECT COALESCE(sum(balance),0) FROM users WHERE role='member') AS balance,(SELECT COALESCE(sum(frozen),0) FROM users WHERE role='member') AS frozen,(SELECT count(*) FROM orders) AS orders,(SELECT count(*) FROM topups WHERE status='pending') AS pending_topups,(SELECT count(*) FROM risk_events WHERE NOT resolved) AS risks,(SELECT count(*) FROM resources WHERE enabled) AS resources,(SELECT count(*) FROM orders WHERE status IN ('queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS active_orders")
+    stats=db.one("SELECT (SELECT count(*) FROM users WHERE role='member') AS customers,(SELECT COALESCE(sum(balance),0) FROM users WHERE role='member') AS balance,(SELECT COALESCE(sum(frozen),0) FROM users WHERE role='member') AS frozen,(SELECT count(*) FROM orders WHERE deleted_at IS NULL) AS orders,(SELECT count(*) FROM topups WHERE status='pending') AS pending_topups,(SELECT count(*) FROM risk_events WHERE NOT resolved) AS risks,(SELECT count(*) FROM resources WHERE enabled) AS resources,(SELECT count(*) FROM orders WHERE deleted_at IS NULL AND status IN ('queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS active_orders")
     scheduler=dict(config('scheduler'),worker_mode=worker_mode())
     scheduler['paused']=scheduler['paused'] or worker_mode()=='off'
     cfg=config('payment')
-    return {'stats':stats,'orders':db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT 8'),'risks':db.all('SELECT * FROM risk_events ORDER BY id DESC LIMIT 5'),'scheduler':scheduler,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')}
+    return {'stats':stats,'orders':db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id WHERE o.deleted_at IS NULL ORDER BY o.created_at DESC LIMIT 8'),'risks':db.all('SELECT * FROM risk_events ORDER BY id DESC LIMIT 5'),'scheduler':scheduler,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')}
 
 
 @admin_router.get('/orders')
-def admin_orders(q:str='',status:str=''):
-    rows=db.all("SELECT "+ORDER_FIELDS+",o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id WHERE ($1='' OR o.email ILIKE '%'||$1||'%' OR o.id ILIKE '%'||$1||'%' OR u.email ILIKE '%'||$1||'%') AND ($2='' OR o.status=$2) ORDER BY o.created_at DESC LIMIT 500",q,status)
+def admin_orders(q:str='',status:str='',page:int=Query(1,ge=1,le=100000),page_size:int=Query(50,ge=1,le=500)):
+    require(len(q)<=200 and status in ('','draft','queued','processing','awaiting_payment','succeeded','failed','cancelled','review'),'订单筛选参数无效')
+    where=" FROM orders o JOIN users u ON u.id=o.user_id WHERE o.deleted_at IS NULL AND ($1='' OR o.email ILIKE '%'||$1||'%' OR o.id ILIKE '%'||$1||'%' OR u.email ILIKE '%'||$1||'%' OR u.name ILIKE '%'||$1||'%' OR o.product_name ILIKE '%'||$1||'%') AND ($2='' OR o.status=$2)"
+    rows=db.all('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner'+where+' ORDER BY o.created_at DESC,o.id DESC LIMIT $3 OFFSET $4',q,status,page_size,(page-1)*page_size)
     for r in rows:
         r['payment']=_order_list_payment(r)
-    return {'items':rows}
+    total=db.scalar('SELECT count(*)'+where,q,status)
+    return {'items':rows,'total':total,'page':page,'page_size':page_size,'has_more':page*page_size<total}
 
 
 @admin_router.get('/orders/{id}')
 def admin_detail(id:str):
-    row=db.one('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1',id)
+    row=db.one('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.deleted_at IS NULL',id)
     require(row,'订单不存在',404)
     if row['status']=='queued':row['queue_message']=queue_message(row.get('workflow'))
     payment={};checkout={};billing={'state':'not_selected'};checkout_links=[]
@@ -188,13 +196,15 @@ def admin_detail(id:str):
             if sr.get('billing_snapshot'):
                 billing=_billing_details(sr['billing_snapshot'])
             checkout_links=_saved_checkout_links(id,sr,checkout)
-    return {'order':row,**_order_history(id,technical=True),'checkout':checkout,'checkout_links':checkout_links,'payment':payment,'billing':billing,'ledger':db.all('SELECT kind,amount,balance_after,frozen_after,description,created_at FROM ledger WHERE order_id=$1 ORDER BY id',id)}
+    closures=db.all('SELECT c.reason,c.prior_status,c.prior_payment_state,c.payment_submitted,c.created_at,u.email AS actor FROM order_closures c JOIN users u ON u.id=c.actor_id WHERE c.order_id=$1 ORDER BY c.created_at',id)
+    if closures and payment:payment['error_code']='admin_closed'
+    return {'closures':closures,'order':row,**_order_history(id,technical=True),'checkout':checkout,'checkout_links':checkout_links,'payment':payment,'billing':billing,'ledger':db.all('SELECT kind,amount,balance_after,frozen_after,description,created_at FROM ledger WHERE order_id=$1 ORDER BY id',id)}
 
 
 @admin_router.patch('/orders/{id}')
 async def note(id:str,request:Request):
     v=await body(request);require(0<=length(v.get('note'))<=1000,'备注内容过长')
     with db.transaction() as q:
-        require(q.execute('UPDATE orders SET note=$2,updated_at=now() WHERE id=$1',id,v['note'])==1,'订单不存在',404)
+        require(q.execute('UPDATE orders SET note=$2,updated_at=now() WHERE id=$1 AND deleted_at IS NULL',id,v['note'])==1,'订单不存在',404)
         audit(q,request,'order.note',id,'更新内部备注')
     return {'ok':True}

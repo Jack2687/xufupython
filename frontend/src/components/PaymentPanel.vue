@@ -5,7 +5,7 @@ import {api,cash,date,notify,type Row} from '../lib'
 const props=defineProps<{order:Row;payment?:Row;checkout?:Row;admin?:boolean}>()
 const emit=defineEmits<{refresh:[]}>()
 const closing=ref(false),closeReason=ref(''),closeAccepted=ref(false)
-const canClose=computed(()=>props.admin&&props.payment?.fee_state==='held'&&!['succeeded','failed','cancelled'].includes(props.payment?.state)&&props.order.status!=='succeeded')
+const canClose=computed(()=>props.admin&&props.payment?.fee_state==='held'&&!['succeeded','failed','cancelled'].includes(props.payment?.state)&&!['succeeded','processing'].includes(props.order.status))
 async function closeOrder(){await run(async()=>{await api(`/admin/orders/${props.order.id}/close`,'POST',{reason:closeReason.value,accepted:closeAccepted.value});closing.value=false;closeReason.value='';closeAccepted.value=false;notify('订单已关闭，冻结服务费已释放')})}
 const number=ref(''),month=ref(''),year=ref(''),cvc=ref(''),accepted=ref(false),agreeQuote=ref(false),busy=ref(false),error=ref('')
 const states:Row={preparing:'准备付款',quoted:'等待金额确认',submitting:'正在付款',checking:'核实付款结果',action_required:'需要额外验证',review:'结果待核实',succeeded:'付款成功',failed:'准备未完成',cancelled:'准备已取消'}

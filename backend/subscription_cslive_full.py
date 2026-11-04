@@ -11,6 +11,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, Request
 from .customer_contract import order_hash
+from .product_ids import internal_id
 
 from . import db, payment_trace as trace
 from . import cslive_full_checkout
@@ -157,6 +158,7 @@ async def create_order(request: Request):
     if workflow == 'subscription':
         require(v.get('accepted') is True, '请确认服务约定')
     product_id = str(v.get('product_id') or '').strip()
+    if request.url.path.startswith('/api/v1/'):product_id = internal_id(product_id)
     require(product_id, '请选择套餐')
     country = str(v.get('country') or 'PH').strip().upper()
     require(country in COUNTRIES, '不支持的订阅地区')
@@ -194,7 +196,7 @@ async def create_order(request: Request):
             require(old.get('request_hash') == rh, '同一 Idempotency-Key 不能用于不同请求', 409)
             return {'id': old['id'], 'status': old['status'], 'replayed': True}
         m = membership_for(user['id'], q)
-        fee = fee_for(m, product['fee']) if workflow == 'subscription' else 0
+        fee = fee_for(m, product['fee'], product_id) if workflow == 'subscription' else 0
         if workflow == 'subscription':
             fresh_user = q.one('SELECT balance,frozen FROM users WHERE id=$1 FOR UPDATE', user['id'])
             require(fresh_user['balance'] - fresh_user['frozen'] >= fee, '可用余额不足，请充值后再试')
@@ -417,7 +419,7 @@ def subscription_detail(id: str, request: Request):
         "SELECT o.id,o.status,o.product_name,o.email,o.country,o.fee,o.renewal,o.activation,o.created_at,o.updated_at,"
         "s.payment_last4,s.payment_amount,s.payment_currency,s.paid_at,s.checkout_session_id"
         " FROM orders o JOIN subscription_runs s ON s.order_id=o.id"
-        " WHERE o.id=$1 AND o.user_id=$2 AND o.workflow='subscription' AND s.subscription_flow=$3",
+        " WHERE o.id=$1 AND o.user_id=$2 AND o.deleted_at IS NULL AND o.workflow='subscription' AND s.subscription_flow=$3",
         id, user['id'], FLOW)
     require(row, '订单不存在', 404)
     events = db.all('SELECT stage,message,created_at FROM order_events WHERE order_id=$1 ORDER BY id', id)

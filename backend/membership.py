@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from . import db
 from .common import *
+from .product_ids import internal_id, public_id
 
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
 SPEND="""SELECT l.user_id,l.order_id,GREATEST(0,-sum(l.amount))::bigint AS spent FROM ledger l JOIN orders o ON o.id=l.order_id AND o.user_id=l.user_id WHERE o.status='succeeded' AND ((l.kind='charge' AND l.amount<0) OR (l.kind='refund' AND l.amount>0)) GROUP BY l.user_id,l.order_id"""
@@ -26,11 +27,20 @@ def membership_for(user_id,q=None):
     user=q.one('SELECT membership_code,membership_until,fee_override FROM users WHERE id=$1',user_id)
     require(user is not None,'用户不存在',404)
     spent=q.scalar('SELECT COALESCE(sum(s.spent),0) FROM ('+SPEND+') s WHERE s.user_id=$1',user_id)
-    return membership_from(user,int(spent),q)
+    result=membership_from(user,int(spent),q)
+    result['product_prices']={public_id(row['product_id']):row['fee'] for row in q.all('SELECT product_id,fee FROM user_product_prices WHERE user_id=$1',user_id)}
+    return result
 
 
-def fee_for(m,standard):
+def fee_for(m,standard,product_id=None):
+    override=m.get('product_prices',{}).get(public_id(product_id))
+    if override is not None:return override
     return m['fee_override'] if m['fee_override'] is not None else (standard*m['current']['discount']+50)//100
+
+
+def fee_source(m,product_id):
+    if public_id(product_id) in m.get('product_prices',{}):return 'product_override'
+    return 'account_override' if m['fee_override'] is not None else 'membership'
 
 
 @router.get('/me')
@@ -44,18 +54,20 @@ def membership(request: Request):
     m=membership_for(current(request)['id'])
     products=db.all('SELECT id,name,description,fee,enabled FROM products ORDER BY sort')
     for p in products:
-        p['member_fee']=fee_for(m,p['fee']);p['saved']=p['fee']-p['member_fee']
-    growth=db.all('SELECT o.id,o.product_name,o.updated_at,s.spent FROM ('+SPEND+') s JOIN orders o ON o.id=s.order_id WHERE s.user_id=$1 ORDER BY o.updated_at DESC LIMIT 100',current(request)['id'])
+        p['member_fee']=fee_for(m,p['fee'],p['id']);p['saved']=p['fee']-p['member_fee'];p['price_source']=fee_source(m,p['id'])
+        if request.url.path.startswith('/api/v1/'):p['id']=public_id(p['id'])
+    growth=db.all('SELECT o.id,o.product_name,o.updated_at,s.spent FROM ('+SPEND+') s JOIN orders o ON o.id=s.order_id WHERE s.user_id=$1 AND o.deleted_at IS NULL ORDER BY o.updated_at DESC LIMIT 100',current(request)['id'])
     return {'membership':m,'products':products,'growth':growth,'unit':'cent_R','basis':'settled_service_spend'}
 
 
 @router.get('/quote')
 @router.get('/v1/quote')
 def quote(request: Request,product_id:str=''):
+    if request.url.path.startswith('/api/v1/'):product_id=internal_id(product_id)
     with db.transaction() as q:
         product=q.one('SELECT fee FROM products WHERE id=$1 AND enabled',product_id)
         require(product is not None,'套餐不存在或已下架',404)
         m=membership_for(current(request)['id'],q)
         payment=config('payment',q)
         connected=payment.get('enabled') is True and payment.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
-        return {'fee':fee_for(m,product['fee']),'standard':product['fee'],'membership':m,'payment_connected':connected}
+        return {'fee':fee_for(m,product['fee'],product_id),'standard':product['fee'],'membership':m,'payment_connected':connected,'price_source':fee_source(m,product_id)}

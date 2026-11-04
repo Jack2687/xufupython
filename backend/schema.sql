@@ -70,6 +70,14 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_code text NOT NULL DEFAULT
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_until timestamptz;
 
+CREATE TABLE IF NOT EXISTS user_product_prices (
+ user_id text NOT NULL REFERENCES users(id),product_id text NOT NULL REFERENCES products(id),
+ fee bigint NOT NULL CHECK(fee>=0),updated_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(user_id,product_id)
+);
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS price_snapshot jsonb NOT NULL DEFAULT '{}';
 
 ALTER TABLE ledger ADD COLUMN IF NOT EXISTS order_id text REFERENCES orders(id);

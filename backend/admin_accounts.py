@@ -4,13 +4,43 @@ from . import db
 from .common import *
 from .wallet import credit
 from .membership import membership_from,SPEND
+from .product_ids import internal_id
 
 router=APIRouter(prefix='/api/admin',dependencies=[Depends(administrator)])
 
 
 @router.get('/users')
 def users(q: str=''):
-    return {'items':db.all("SELECT u.id,u.email,u.name,u.role,u.status,u.balance,u.frozen,u.fee_override,u.invite_code,u.created_at,(SELECT count(*) FROM orders o WHERE o.user_id=u.id) AS orders FROM users u WHERE ($1='' OR u.email ILIKE '%'||$1||'%' OR u.name ILIKE '%'||$1||'%') ORDER BY u.created_at DESC LIMIT 500",q)}
+    rows=db.all("SELECT u.id,u.email,u.name,u.role,u.status,u.balance,u.frozen,u.fee_override,u.membership_code,u.membership_until,u.invite_code,u.created_at,(SELECT count(*) FROM orders o WHERE o.user_id=u.id AND o.deleted_at IS NULL) AS orders,COALESCE(s.spent,0)::bigint AS spent FROM users u LEFT JOIN (SELECT user_id,sum(spent) AS spent FROM ("+SPEND+") s GROUP BY user_id) s ON s.user_id=u.id WHERE ($1='' OR u.email ILIKE '%'||$1||'%' OR u.name ILIKE '%'||$1||'%') ORDER BY u.created_at DESC LIMIT 500",q)
+    prices={}
+    for row in db.all('SELECT user_id,product_id,fee FROM user_product_prices'):
+        prices.setdefault(row['user_id'],{})[row['product_id']]=row['fee']
+    for row in rows:
+        row['membership']=membership_from(row,row['spent']);row['product_prices']=prices.get(row['id'],{})
+    return {'items':rows,'tiers':config('tiers')['items'],'products':db.all('SELECT id,name,fee FROM products WHERE enabled ORDER BY sort,id')}
+
+
+def account_options(q,request,id,value):
+    if 'membership_code' in value or 'membership_until' in value:
+        old=q.one('SELECT membership_code,membership_until FROM users WHERE id=$1',id)
+        code=value.get('membership_code',old['membership_code'])
+        until=parsedate(value.get('membership_until',old['membership_until'].isoformat() if old['membership_until'] else None))
+        require(isinstance(code,str) and (code=='' or any(t['code']==code for t in config('tiers',q)['items'])),'会员等级不存在')
+        if not code:until=None
+        require(until is None or until>now() or (code==old['membership_code'] and until==old['membership_until']),'会员到期时间必须晚于现在')
+        q.execute('UPDATE users SET membership_code=$2,membership_until=$3 WHERE id=$1',id,code,until)
+    if 'product_prices' in value:
+        prices=value['product_prices'];require(isinstance(prices,dict) and len(prices)<=200,'套餐专属价格格式无效')
+        enabled={p['id'] for p in q.all('SELECT id FROM products WHERE enabled')}
+        normalized={}
+        for product,fee in prices.items():
+            require(isinstance(product,str) and internal_id(product) in enabled,'只能设置已开放套餐的价格')
+            product=internal_id(product);require(product not in normalized,'套餐价格重复')
+            normalized[product]=integer(fee,0,100000000,'套餐价格须为有效的非负整数金额')
+        q.execute('DELETE FROM user_product_prices WHERE user_id=$1 AND product_id IN (SELECT id FROM products WHERE enabled)',id)
+        for product,fee in normalized.items():
+            q.execute('INSERT INTO user_product_prices(user_id,product_id,fee) VALUES($1,$2,$3)',id,product,fee)
+        audit(q,request,'user.product_pricing',id,'更新开放套餐专属价格：'+','.join(normalized))
 
 
 @router.post('/users')
@@ -21,6 +51,7 @@ async def create_user(request: Request):
     try:
         with db.transaction() as q:
             q.execute('INSERT INTO users(id,email,name,password_hash,role,invite_code) VALUES($1,$2,$3,$4,$5,$6)',id,email,name,hashed,role,uid()[:10])
+            account_options(q,request,id,v)
             audit(q,request,'user.created',id,'新建账户 / '+role)
     except UniqueViolation:
         raise BusinessError('邮箱已存在或不可用')
@@ -42,6 +73,7 @@ async def update_user(id: str,request: Request):
             if old['role']=='admin' and old['status']=='active' and (role!='admin' or status!='active'):
                 require(q.scalar("SELECT count(*) FROM users WHERE role='admin' AND status='active'")>1,'至少保留一个可用管理员')
             q.execute('UPDATE users SET email=$2,name=$3,role=$4,status=$5,fee_override=$6,updated_at=now() WHERE id=$1',id,email,name,role,status,fee)
+            account_options(q,request,id,v)
             if pw:q.execute('UPDATE users SET password_hash=$2 WHERE id=$1',id,password_hash(pw))
             if pw or status!='active' or role!=old['role']:
                 q.execute('DELETE FROM sessions WHERE user_id=$1',id);q.execute('UPDATE api_keys SET revoked=true WHERE user_id=$1',id)

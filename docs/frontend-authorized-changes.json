@@ -14,7 +14,8 @@
     "frontend/src/components/PaymentPanel.vue",
     "frontend/src/components/PaymentAction.vue",
     "frontend/src/apiDocs.ts",
-    "frontend/tests/apiDocs.test.mjs"
+    "frontend/tests/apiDocs.test.mjs",
+    "frontend/src/components/DataTable.vue"
   ],
   "checkout_display": "2026-11-03：用户要求排查订阅办理监控中提链地址缺失。仅增加管理员已保存链接的只读投影和展示，不改变付款核心。当前快照不冒充完整分轮历史。",
   "post_payment_alignment": "2026-11-03：按用户要求对齐付款成功后的核实与关闭续费。监控区分付款成功和收尾完成，展示本单出口比对及续费查询；未修改付款前页面逻辑。",
@@ -26,5 +27,6 @@
   "subscription_network_retry": "2026-11-03：用户要求新增可配置网络重试次数，提链成功后复用原链接；付款配置展示次数与间隔说明，监控展示重试次数及链接复用。",
   "gener_go_post_payment": "2026-11-03：只将 gener_direct_pay 的显示名追加 +Go付款成功后续，键值与另一条流程显示不变。付款确认成功后由独立 Go 程序收尾；不迁移旧订单。",
   "remove_cslive_direct_final": "2026-11-03：用户最终要求仅本地删除 cslive_direct_pay 选项及专属流程；Customer.vue 回到唯一 /orders 入口，保留 gener+HTTP+Go 后续。未新增流程、未发布。",
-  "customer_order_log_visibility": "2026-11-04：按用户截图移除客户订单详情下方的原始执行日志时间线，保留步骤进度、订单状态与结果；管理员排查日志和后端记录保留。同时同步开发接入页的18接口简介。"
+  "customer_order_log_visibility": "2026-11-04：按用户截图移除客户订单详情下方的原始执行日志时间线，保留步骤进度、订单状态与结果；管理员排查日志和后端记录保留。同时同步开发接入页的18接口简介。",
+  "admin_orders_pricing": "2026-11-04：用户授权修复人工关闭订单，增加全量搜索与批量删除、账户会员和套餐独立价格，补齐客户 API 字段及 pro20x 标识；保留管理员步骤。"
 }

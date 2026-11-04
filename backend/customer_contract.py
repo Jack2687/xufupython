@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .common import BusinessError, current, digest, require
+from .product_ids import internal_id
 
 
 class Payload(BaseModel):
@@ -55,6 +56,7 @@ def prepare(request, model, payload):
         if 'session' in value:
             require(isinstance(value['session'], dict), 'Session 必须是 JSON 对象')
         if model is OrderRequest:
+            value['product_id'] = internal_id(value['product_id'])
             require(value['premium_seats'] <= value['seats'], '高级席位不能超过总席位')
             if value['workflow'] == 'subscription':
                 require(value['accepted'] is True, '请确认服务约定')

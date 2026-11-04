@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "序付 API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "面向序付用户的服务端接入 API：订阅办理、生成结账链接、关闭自动续费、订单查询、账户与资金管理。"
   },
   "servers": [
@@ -65,7 +65,8 @@
                         "discount": 100,
                         "description": ""
                       }
-                    ]
+                    ],
+                    "product_prices": {}
                   }
                 }
               }
@@ -199,7 +200,7 @@
       "get": {
         "operationId": "get_catalog",
         "summary": "查询套餐",
-        "description": "返回在售套餐、当前账户服务费和支持的订阅地区。",
+        "description": "返回已开放套餐、当前账户服务费和支持的订阅地区。后续新增套餐也从 items[].id 获取接口标识，再传给报价和下单的 product_id；Pro 20x 的标识为 pro20x。",
         "security": [
           {
             "BearerKey": []
@@ -217,10 +218,12 @@
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/Product"
-                      }
+                      },
+                      "description": "已开放且可选的套餐列表；请从 id 读取下单接口标识。"
                     },
                     "membership": {
-                      "$ref": "#/components/schemas/Membership"
+                      "$ref": "#/components/schemas/Membership",
+                      "description": "当前账户会员及计价设置。"
                     },
                     "unit": {
                       "type": "string",
@@ -244,7 +247,8 @@
                             "description": "币种。"
                           }
                         }
-                      }
+                      },
+                      "description": "可选订阅地区及对应币种；下单传 code。"
                     },
                     "payment_connected": {
                       "type": "boolean",
@@ -261,7 +265,8 @@
                       "fee": 10000,
                       "member_fee": 10000,
                       "tag": "",
-                      "features": []
+                      "features": [],
+                      "price_source": "membership"
                     }
                   ],
                   "membership": {
@@ -294,7 +299,8 @@
                         "discount": 100,
                         "description": ""
                       }
-                    ]
+                    ],
+                    "product_prices": {}
                   },
                   "unit": "cent_R",
                   "countries": [
@@ -437,7 +443,7 @@
       "get": {
         "operationId": "get_quote",
         "summary": "查询服务费报价",
-        "description": "按套餐与当前账户会员等级计算平台服务费；不创建订单。",
+        "description": "查询当前账户在指定套餐的服务费，不创建订单。优先使用该套餐专属价，其次原账户通用价，否则按当前会员等级计算；实际订单保留下单时的报价快照。",
         "security": [
           {
             "BearerKey": []
@@ -462,11 +468,21 @@
                       "minimum": 0
                     },
                     "membership": {
-                      "$ref": "#/components/schemas/Membership"
+                      "$ref": "#/components/schemas/Membership",
+                      "description": "报价时采用的会员及专属计价设置。"
                     },
                     "payment_connected": {
                       "type": "boolean",
                       "description": "当前是否开放订阅办理。"
+                    },
+                    "price_source": {
+                      "type": "string",
+                      "enum": [
+                        "product_override",
+                        "account_override",
+                        "membership"
+                      ],
+                      "description": "本次价格来源：product_override 为该套餐专属价，account_override 为账户通用价，membership 为当前会员折扣；按此顺序优先使用。"
                     }
                   }
                 },
@@ -503,9 +519,11 @@
                         "discount": 100,
                         "description": ""
                       }
-                    ]
+                    ],
+                    "product_prices": {}
                   },
-                  "payment_connected": true
+                  "payment_connected": true,
+                  "price_source": "membership"
                 }
               }
             }
@@ -633,11 +651,18 @@
             "name": "product_id",
             "in": "query",
             "required": true,
-            "description": "从套餐列表取得的编号。",
+            "description": "套餐接口标识：Pro 5x 传 pro5x，Pro 20x 传 pro20x，Team 标准传 team，Team 高级传 team_premium。实际开放及新增套餐以 GET /api/v1/catalog 的 items[].id 为准，按返回值原样传入。 来源：调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
             "schema": {
               "type": "string"
             },
-            "example": "pro5x"
+            "example": "pro20x",
+            "x-input-source": "调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
+            "x-source-operations": [
+              {
+                "operationId": "get_catalog",
+                "label": "GET /api/v1/catalog"
+              }
+            ]
           }
         ],
         "tags": [
@@ -664,7 +689,8 @@
                   "type": "object",
                   "properties": {
                     "membership": {
-                      "$ref": "#/components/schemas/Membership"
+                      "$ref": "#/components/schemas/Membership",
+                      "description": "当前会员、自动升级进度及账户计价设置。"
                     },
                     "products": {
                       "type": "array",
@@ -673,7 +699,7 @@
                         "properties": {
                           "id": {
                             "type": "string",
-                            "description": "套餐编号。"
+                            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。"
                           },
                           "name": {
                             "type": "string",
@@ -699,11 +725,20 @@
                           },
                           "saved": {
                             "type": "integer",
-                            "description": "相对标准价节省金额，单位：分 R（100 分 R = 1 R）。",
-                            "minimum": 0
+                            "description": "标准服务费减去当前账户服务费，分 R；专属价高于标准价时可能为负数。"
+                          },
+                          "price_source": {
+                            "type": "string",
+                            "enum": [
+                              "product_override",
+                              "account_override",
+                              "membership"
+                            ],
+                            "description": "本次价格来源：product_override 为该套餐专属价，account_override 为账户通用价，membership 为当前会员折扣；按此顺序优先使用。"
                           }
                         }
-                      }
+                      },
+                      "description": "套餐及当前账户报价；enabled=false 表示当前不可新建订单。"
                     },
                     "growth": {
                       "type": "array",
@@ -729,7 +764,8 @@
                             "minimum": 0
                           }
                         }
-                      }
+                      },
+                      "description": "最近 100 笔未删除的已结算订单成长记录；删除展示记录不回退累计消费。"
                     },
                     "unit": {
                       "type": "string",
@@ -775,7 +811,8 @@
                         "discount": 100,
                         "description": ""
                       }
-                    ]
+                    ],
+                    "product_prices": {}
                   },
                   "products": [],
                   "growth": [],
@@ -1072,7 +1109,9 @@
                         "type": "string"
                       }
                     ],
-                    "description": "完整 Session 对象，或包含该对象的 JSON 字符串。"
+                    "description": "完整 Session 对象，或包含该对象的 JSON 字符串。 来源：由用户提供目标订阅账号登录后的完整 Session JSON；本 API 不生成 Session。POST /api/v1/session/inspect 只返回校验摘要，不能把该摘要作为 session 提交。",
+                    "x-input-source": "由用户提供目标订阅账号登录后的完整 Session JSON；本 API 不生成 Session。POST /api/v1/session/inspect 只返回校验摘要，不能把该摘要作为 session 提交。",
+                    "x-source-operations": []
                   }
                 },
                 "required": [
@@ -1264,7 +1303,9 @@
                 "properties": {
                   "code": {
                     "type": "string",
-                    "description": "兑换码。"
+                    "description": "兑换码。 来源：由用户提供通过站点取得的兑换码；客户 API 不提供生成或领取兑换码的接口。",
+                    "x-input-source": "由用户提供通过站点取得的兑换码；客户 API 不提供生成或领取兑换码的接口。",
+                    "x-source-operations": []
                   }
                 },
                 "required": [
@@ -1287,7 +1328,7 @@
       "get": {
         "operationId": "list_orders",
         "summary": "查询订单列表",
-        "description": "查询本账户订单，支持关键词、状态、业务类型筛选及分页；默认每页 200 条。",
+        "description": "查询本账户订单，支持关键词、状态、业务类型筛选及分页；默认每页 200 条。 管理员删除的订单不再返回；访问该订单详情返回 404，原 Idempotency-Key 仍被保留，再次提交返回 409，避免误重复下单。",
         "security": [
           {
             "BearerKey": []
@@ -1465,16 +1506,18 @@
             "name": "q",
             "in": "query",
             "required": false,
-            "description": "订单编号或订阅邮箱关键词。",
+            "description": "订单编号或订阅邮箱关键词。 来源：由用户输入订单编号或订阅邮箱关键词；已保存的订单编号也可直接作为搜索词。",
             "schema": {
               "type": "string"
-            }
+            },
+            "x-input-source": "由用户输入订单编号或订阅邮箱关键词；已保存的订单编号也可直接作为搜索词。",
+            "x-source-operations": []
           },
           {
             "name": "status",
             "in": "query",
             "required": false,
-            "description": "按订单状态筛选。",
+            "description": "按订单状态筛选。 来源：由调用方从下方枚举中选择筛选状态；也可以使用本列表 items[].status 的值，省略表示全部。",
             "schema": {
               "type": "string",
               "description": "订单状态。",
@@ -1488,19 +1531,23 @@
                 "cancelled",
                 "review"
               ]
-            }
+            },
+            "x-input-source": "由调用方从下方枚举中选择筛选状态；也可以使用本列表 items[].status 的值，省略表示全部。",
+            "x-source-operations": []
           },
           {
             "name": "workflow",
             "in": "query",
-            "description": "按订阅或提链类型筛选。",
+            "description": "按订阅或提链类型筛选。 来源：由调用方选择 subscription 或 link，或使用订单记录的 workflow；省略表示全部。",
             "schema": {
               "type": "string",
               "enum": [
                 "subscription",
                 "link"
               ]
-            }
+            },
+            "x-input-source": "由调用方选择 subscription 或 link，或使用订单记录的 workflow；省略表示全部。",
+            "x-source-operations": []
           },
           {
             "name": "page",
@@ -1511,7 +1558,9 @@
               "maximum": 100000,
               "default": 1
             },
-            "description": "页码，从 1 开始。"
+            "description": "页码，从 1 开始。 来源：由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-input-source": "由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-source-operations": []
           },
           {
             "name": "page_size",
@@ -1522,7 +1571,9 @@
               "maximum": 200,
               "default": 200
             },
-            "description": "每页数量，最多 200。"
+            "description": "每页数量，最多 200。 来源：由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-input-source": "由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-source-operations": []
           }
         ],
         "tags": [
@@ -1532,7 +1583,7 @@
       "post": {
         "operationId": "create_order",
         "summary": "提交订阅或生成结账链接",
-        "description": "subscription 提交订阅办理并冻结服务费；link 仅生成链接，不自动付款、不收取该笔订阅服务费。返回 id 后使用订单详情查询。请求按站点当前办理方式受理，客户无需指定内部流程。",
+        "description": "subscription 提交订阅办理并冻结服务费；link 仅生成链接，不自动付款、不收取该笔订阅服务费。返回 id 后使用订单详情查询。请求按站点当前办理方式受理，客户无需指定内部流程。 管理员删除的订单不再返回；访问该订单详情返回 404，原 Idempotency-Key 仍被保留，再次提交返回 409，避免误重复下单。",
         "tags": [
           "订阅与结账链接"
         ],
@@ -1541,13 +1592,15 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
-            "description": "同一次操作使用固定请求标识；超时重试必须复用相同标识和相同请求内容。不同操作使用新标识。",
+            "description": "同一次操作使用固定请求标识；超时重试必须复用相同标识和相同请求内容。不同操作使用新标识。 来源：由调用方为一次操作生成并保存唯一值，例如 UUID。首次请求前生成，超时重试复用原值；不是从查询接口读取。",
             "schema": {
               "type": "string",
               "minLength": 8,
               "maxLength": 120
             },
-            "example": "YOUR_UNIQUE_REQUEST_ID"
+            "example": "YOUR_UNIQUE_REQUEST_ID",
+            "x-input-source": "由调用方为一次操作生成并保存唯一值，例如 UUID。首次请求前生成，超时重试复用原值；不是从查询接口读取。",
+            "x-source-operations": []
           }
         ],
         "responses": {
@@ -1692,10 +1745,10 @@
               },
               "examples": {
                 "subscription": {
-                  "summary": "订阅办理",
+                  "summary": "Pro 20x 订阅办理",
                   "value": {
                     "workflow": "subscription",
-                    "product_id": "pro5x",
+                    "product_id": "pro20x",
                     "country": "PH",
                     "session": {
                       "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
@@ -1749,7 +1802,7 @@
       "get": {
         "operationId": "get_order",
         "summary": "查询订单详情",
-        "description": "读取订单、进度、结账地址和付款结果。付款成功后须分别检查订阅生效和自动续费状态。",
+        "description": "读取订单、进度、结账地址和付款结果。付款成功后须分别检查订阅生效和自动续费状态。 管理员删除的订单不再返回；访问该订单详情返回 404，原 Idempotency-Key 仍被保留，再次提交返回 409，避免误重复下单。",
         "security": [
           {
             "BearerKey": []
@@ -1925,11 +1978,22 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "本账户的订单编号。",
+            "description": "本账户的订单编号。 来源：调用 POST /api/v1/orders 后保存响应根级 id，或从 GET /api/v1/orders 的 items[].id 选取；将它替换到路径 /api/v1/orders/{id}。这是订单编号。",
             "schema": {
               "type": "string"
             },
-            "example": "ORDER_ID"
+            "example": "ORDER_ID",
+            "x-input-source": "调用 POST /api/v1/orders 后保存响应根级 id，或从 GET /api/v1/orders 的 items[].id 选取；将它替换到路径 /api/v1/orders/{id}。这是订单编号。",
+            "x-source-operations": [
+              {
+                "operationId": "create_order",
+                "label": "POST /api/v1/orders → id"
+              },
+              {
+                "operationId": "list_orders",
+                "label": "GET /api/v1/orders → items[].id"
+              }
+            ]
           }
         ],
         "tags": [
@@ -1950,13 +2014,15 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
-            "description": "同一次操作使用固定请求标识；超时重试必须复用相同标识和相同请求内容。不同操作使用新标识。",
+            "description": "同一次操作使用固定请求标识；超时重试必须复用相同标识和相同请求内容。不同操作使用新标识。 来源：由调用方为一次操作生成并保存唯一值，例如 UUID。首次请求前生成，超时重试复用原值；不是从查询接口读取。",
             "schema": {
               "type": "string",
               "minLength": 8,
               "maxLength": 120
             },
-            "example": "YOUR_UNIQUE_REQUEST_ID"
+            "example": "YOUR_UNIQUE_REQUEST_ID",
+            "x-input-source": "由调用方为一次操作生成并保存唯一值，例如 UUID。首次请求前生成，超时重试复用原值；不是从查询接口读取。",
+            "x-source-operations": []
           }
         ],
         "responses": {
@@ -2135,7 +2201,7 @@
           {
             "name": "status",
             "in": "query",
-            "description": "按业务状态筛选，省略为全部。",
+            "description": "按业务状态筛选，省略为全部。 来源：由调用方从下方枚举中选择筛选状态；也可以使用本列表 items[].status 的值，省略表示全部。",
             "schema": {
               "type": "string",
               "description": "disabled：确认已关闭；no_subscription：未发现可关闭订阅；review：需要核实，不表示成功。",
@@ -2147,7 +2213,9 @@
                 "no_subscription",
                 "review"
               ]
-            }
+            },
+            "x-input-source": "由调用方从下方枚举中选择筛选状态；也可以使用本列表 items[].status 的值，省略表示全部。",
+            "x-source-operations": []
           },
           {
             "name": "page",
@@ -2158,7 +2226,9 @@
               "maximum": 100000,
               "default": 1
             },
-            "description": "页码，从 1 开始。"
+            "description": "页码，从 1 开始。 来源：由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-input-source": "由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-source-operations": []
           },
           {
             "name": "page_size",
@@ -2169,7 +2239,9 @@
               "maximum": 200,
               "default": 50
             },
-            "description": "每页数量，最多 200。"
+            "description": "每页数量，最多 200。 来源：由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-input-source": "由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-source-operations": []
           }
         ],
         "responses": {
@@ -2332,11 +2404,22 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "当前账户拥有的记录编号。",
+            "description": "当前账户拥有的记录编号。 来源：调用 POST /api/v1/renewals 后保存响应根级 id，或从 GET /api/v1/renewals 的 items[].id 选取；将它替换到路径 /api/v1/renewals/{id}。这是续费任务编号，不是订单编号。",
             "schema": {
               "type": "string"
             },
-            "example": "RECORD_ID"
+            "example": "RECORD_ID",
+            "x-input-source": "调用 POST /api/v1/renewals 后保存响应根级 id，或从 GET /api/v1/renewals 的 items[].id 选取；将它替换到路径 /api/v1/renewals/{id}。这是续费任务编号，不是订单编号。",
+            "x-source-operations": [
+              {
+                "operationId": "create_renewal",
+                "label": "POST /api/v1/renewals → id"
+              },
+              {
+                "operationId": "list_renewals",
+                "label": "GET /api/v1/renewals → items[].id"
+              }
+            ]
           }
         ],
         "responses": {
@@ -2538,7 +2621,8 @@
                         "discount": 100,
                         "description": ""
                       }
-                    ]
+                    ],
+                    "product_prices": {}
                   }
                 }
               }
@@ -2844,7 +2928,9 @@
               "maximum": 100000,
               "default": 1
             },
-            "description": "页码，从 1 开始。"
+            "description": "页码，从 1 开始。 来源：由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-input-source": "由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-source-operations": []
           },
           {
             "name": "page_size",
@@ -2855,7 +2941,9 @@
               "maximum": 200,
               "default": 50
             },
-            "description": "每页数量，最多 200。"
+            "description": "每页数量，最多 200。 来源：由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-input-source": "由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-source-operations": []
           }
         ],
         "responses": {
@@ -3008,7 +3096,7 @@
           {
             "name": "status",
             "in": "query",
-            "description": "按业务状态筛选，省略为全部。",
+            "description": "按业务状态筛选，省略为全部。 来源：由调用方从下方枚举中选择筛选状态；也可以使用本列表 items[].status 的值，省略表示全部。",
             "schema": {
               "type": "string",
               "description": "审核状态。",
@@ -3018,7 +3106,9 @@
                 "rejected",
                 "cancelled"
               ]
-            }
+            },
+            "x-input-source": "由调用方从下方枚举中选择筛选状态；也可以使用本列表 items[].status 的值，省略表示全部。",
+            "x-source-operations": []
           },
           {
             "name": "page",
@@ -3029,7 +3119,9 @@
               "maximum": 100000,
               "default": 1
             },
-            "description": "页码，从 1 开始。"
+            "description": "页码，从 1 开始。 来源：由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-input-source": "由调用方指定，首次查询用 1；本接口响应 has_more=true 时，将响应 page 加 1 查询下一页。",
+            "x-source-operations": []
           },
           {
             "name": "page_size",
@@ -3040,7 +3132,9 @@
               "maximum": 200,
               "default": 50
             },
-            "description": "每页数量，最多 200。"
+            "description": "每页数量，最多 200。 来源：由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-input-source": "由调用方选择每页条数；沿用接口默认值或在允许范围内设置，翻页时保持一致。",
+            "x-source-operations": []
           }
         ],
         "responses": {
@@ -3192,13 +3286,15 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
-            "description": "同一次操作使用固定请求标识；超时重试必须复用相同标识和相同请求内容。不同操作使用新标识。",
+            "description": "同一次操作使用固定请求标识；超时重试必须复用相同标识和相同请求内容。不同操作使用新标识。 来源：由调用方为一次操作生成并保存唯一值，例如 UUID。首次请求前生成，超时重试复用原值；不是从查询接口读取。",
             "schema": {
               "type": "string",
               "minLength": 8,
               "maxLength": 120
             },
-            "example": "YOUR_UNIQUE_REQUEST_ID"
+            "example": "YOUR_UNIQUE_REQUEST_ID",
+            "x-input-source": "由调用方为一次操作生成并保存唯一值，例如 UUID。首次请求前生成，超时重试复用原值；不是从查询接口读取。",
+            "x-source-operations": []
           }
         ],
         "responses": {
@@ -3380,11 +3476,22 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "当前账户拥有的记录编号。",
+            "description": "当前账户拥有的记录编号。 来源：使用 POST /api/v1/topups 响应根级 id，或 GET /api/v1/topups 的 items[].id；将它替换到 /api/v1/topups/{id}/cancel。只能取消待审核或已取消的充值申请。",
             "schema": {
               "type": "string"
             },
-            "example": "RECORD_ID"
+            "example": "RECORD_ID",
+            "x-input-source": "使用 POST /api/v1/topups 响应根级 id，或 GET /api/v1/topups 的 items[].id；将它替换到 /api/v1/topups/{id}/cancel。只能取消待审核或已取消的充值申请。",
+            "x-source-operations": [
+              {
+                "operationId": "create_topup",
+                "label": "POST /api/v1/topups → id"
+              },
+              {
+                "operationId": "list_topups",
+                "label": "GET /api/v1/topups → items[].id"
+              }
+            ]
           }
         ],
         "responses": {
@@ -3396,7 +3503,8 @@
                   "type": "object",
                   "properties": {
                     "ok": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "true 表示申请已取消，重复取消仍返回成功。"
                     }
                   }
                 },
@@ -3532,7 +3640,7 @@
       "BearerKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "在网页开发接入中创建 API 密钥。"
+        "description": "在序付网页「开发接入」创建 API 密钥，保存创建成功时显示的完整密钥；请求头传 Authorization: Bearer <密钥>。客户 API 不提供创建密钥的接口。"
       }
     },
     "schemas": {
@@ -3578,10 +3686,12 @@
         "type": "object",
         "properties": {
           "current": {
-            "$ref": "#/components/schemas/Tier"
+            "$ref": "#/components/schemas/Tier",
+            "description": "当前生效的会员等级。"
           },
           "automatic": {
-            "$ref": "#/components/schemas/Tier"
+            "$ref": "#/components/schemas/Tier",
+            "description": "按累计已结算服务消费计算的自动等级。"
           },
           "next": {
             "anyOf": [
@@ -3591,7 +3701,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "自动升级的下一等级；已达最高等级时为 null，不受人工指定等级影响。"
           },
           "spent": {
             "type": "integer",
@@ -3620,7 +3731,7 @@
               "string",
               "null"
             ],
-            "description": "指定等级的到期时间。",
+            "description": "人工指定等级的到期时间；null 表示永久指定或当前使用自动等级，结合 source 判断。",
             "format": "date-time"
           },
           "fee_override": {
@@ -3628,13 +3739,28 @@
               "integer",
               "null"
             ],
-            "description": "账户专属服务费，单位分 R；null 表示使用等级折扣。"
+            "description": "账户通用服务费，分 R；优先使用套餐专属价，其次此值，均未设置时使用会员折扣。"
           },
           "tiers": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Tier"
-            }
+            },
+            "description": "站点配置的全部会员等级，按消费门槛升序排列。"
+          },
+          "product_prices": {
+            "type": "object",
+            "description": "该账户设置的套餐专属服务费，键为套餐接口标识，值为分 R；0 为有效免费价，缺少该键表示沿用账户通用价或会员折扣。",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "此套餐的专属服务费，分 R。"
+            },
+            "examples": [
+              {
+                "pro20x": 900
+              }
+            ]
           }
         }
       },
@@ -3643,49 +3769,69 @@
         "properties": {
           "accessToken": {
             "type": "string",
-            "description": "账号的有效 accessToken。"
+            "description": "账号的有效 accessToken。 来源：保留目标账号原始 Session 中的 accessToken。",
+            "x-input-source": "保留目标账号原始 Session 中的 accessToken。",
+            "x-source-operations": []
           },
           "user": {
             "type": "object",
             "properties": {
               "email": {
                 "type": "string",
-                "description": "账号邮箱。",
-                "format": "email"
+                "description": "账号邮箱。 来源：来自原始 Session 的 user.email；目标订阅邮箱可与序付登录邮箱不同。",
+                "format": "email",
+                "x-input-source": "来自原始 Session 的 user.email；目标订阅邮箱可与序付登录邮箱不同。",
+                "x-source-operations": []
               }
             },
             "required": [
               "email"
-            ]
+            ],
+            "description": "Session 中的账号资料，包含目标订阅邮箱。 来源：保留目标账号原始 Session 中的 user 对象。",
+            "x-input-source": "保留目标账号原始 Session 中的 user 对象。",
+            "x-source-operations": []
           },
           "account": {
             "type": "object",
             "properties": {
               "id": {
                 "type": "string",
-                "description": "账号空间标识。"
+                "description": "账号空间标识。 来源：来自原始 Session 的 account.id；不是 GET /api/v1/me 返回的序付账户 id。",
+                "x-input-source": "来自原始 Session 的 account.id；不是 GET /api/v1/me 返回的序付账户 id。",
+                "x-source-operations": []
               },
               "planType": {
                 "type": "string",
-                "description": "当前套餐类型。"
+                "description": "当前套餐类型。 来源：来自原始 Session 的 account.planType；它表示原账号套餐，不是本次下单的 product_id。",
+                "x-input-source": "来自原始 Session 的 account.planType；它表示原账号套餐，不是本次下单的 product_id。",
+                "x-source-operations": []
               }
             },
             "required": [
               "id"
-            ]
+            ],
+            "description": "Session 中的账号空间，包含账号标识和当前套餐。 来源：保留目标账号原始 Session 中的 account 对象。",
+            "x-input-source": "保留目标账号原始 Session 中的 account 对象。",
+            "x-source-operations": []
           },
           "expires": {
             "type": "string",
-            "description": "Session 到期时间。",
-            "format": "date-time"
+            "description": "Session 到期时间。 来源：来自目标账号原始 Session 中的 expires；保留原值。",
+            "format": "date-time",
+            "x-input-source": "来自目标账号原始 Session 中的 expires；保留原值。",
+            "x-source-operations": []
           },
           "sessionToken": {
             "type": "string",
-            "description": "如原 Session 包含此值，请一并保留。"
+            "description": "如原 Session 包含此值，请一并保留。 来源：来自目标账号原始 Session 的 sessionToken；如有则保留。",
+            "x-input-source": "来自目标账号原始 Session 的 sessionToken；如有则保留。",
+            "x-source-operations": []
           },
           "cookies": {
             "type": "string",
-            "description": "如原 Session 包含 Cookie 字符串，请一并保留。"
+            "description": "如原 Session 包含 Cookie 字符串，请一并保留。 来源：来自目标账号已授权会话的 Cookie 字符串；如原资料包含则保留。",
+            "x-input-source": "来自目标账号已授权会话的 Cookie 字符串；如原资料包含则保留。",
+            "x-source-operations": []
           }
         },
         "required": [
@@ -3732,7 +3878,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "套餐编号。"
+            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。"
           },
           "name": {
             "type": "string",
@@ -3749,19 +3895,29 @@
           },
           "member_fee": {
             "type": "integer",
-            "description": "当前账户服务费，单位：分 R（100 分 R = 1 R）。",
+            "description": "当前账户实际服务费，分 R；优先使用套餐专属价，其次账户通用价，最后会员折扣。",
             "minimum": 0
           },
           "features": {
             "type": "array",
             "items": {
               "type": "string",
-              "description": ""
-            }
+              "description": "一项套餐权益说明。"
+            },
+            "description": "用于展示的套餐权益列表；可为空数组。"
           },
           "tag": {
             "type": "string",
             "description": "套餐标签。"
+          },
+          "price_source": {
+            "type": "string",
+            "enum": [
+              "product_override",
+              "account_override",
+              "membership"
+            ],
+            "description": "本次价格来源：product_override 为该套餐专属价，account_override 为账户通用价，membership 为当前会员折扣；按此顺序优先使用。"
           }
         }
       },
@@ -3811,11 +3967,11 @@
           },
           "currency": {
             "type": "string",
-            "description": "币种代码，不区分大小写。JPY 为日元，其余支持币种为百分之一单位。"
+            "description": "保存的付款币种代码；未记录时为空字符串。"
           },
           "fee_state": {
             "type": "string",
-            "description": "服务费状态。",
+            "description": "服务费状态：held 为冻结，released 为已释放或未冻结，charged 为已结算。",
             "enum": [
               "held",
               "released",
@@ -3855,7 +4011,7 @@
           },
           "product_id": {
             "type": "string",
-            "description": "套餐编号。"
+            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。"
           },
           "product_name": {
             "type": "string",
@@ -3894,7 +4050,7 @@
           },
           "source": {
             "type": "string",
-            "description": "订单来源。"
+            "description": "创建来源：web 表示网站，api 表示客户 API。"
           },
           "workflow": {
             "type": "string",
@@ -3940,7 +4096,8 @@
             "format": "date-time"
           },
           "price_snapshot": {
-            "$ref": "#/components/schemas/PriceSnapshot"
+            "$ref": "#/components/schemas/PriceSnapshot",
+            "description": "下单时保存的价格与会员快照，后续账户或套餐改价不改变此订单。"
           },
           "payment": {
             "$ref": "#/components/schemas/PaymentSummary",
@@ -3956,7 +4113,8 @@
         "type": "object",
         "properties": {
           "order": {
-            "$ref": "#/components/schemas/Order"
+            "$ref": "#/components/schemas/Order",
+            "description": "当前账户的订单及结果。"
           },
           "events": {
             "type": "array",
@@ -3981,13 +4139,16 @@
                   "format": "date-time"
                 }
               }
-            }
+            },
+            "description": "按时间顺序返回的业务进度记录；可为空，不包含管理员技术诊断。"
           },
           "checkout": {
-            "$ref": "#/components/schemas/Checkout"
+            "$ref": "#/components/schemas/Checkout",
+            "description": "已保存的结账结果；尚未生成链接时可为空对象。"
           },
           "payment": {
-            "$ref": "#/components/schemas/Payment"
+            "$ref": "#/components/schemas/Payment",
+            "description": "站内付款摘要；仅提链或尚无付款记录时可为空对象。"
           },
           "trace": {
             "type": "array",
@@ -4016,7 +4177,7 @@
               "integer",
               "null"
             ],
-            "description": "账户专属服务费，单位分 R。"
+            "description": "账户通用服务费，分 R；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
           },
           "unit": {
             "type": "string",
@@ -4026,7 +4187,8 @@
             ]
           },
           "membership": {
-            "$ref": "#/components/schemas/Membership"
+            "$ref": "#/components/schemas/Membership",
+            "description": "当前账户会员与专属计价信息。"
           }
         }
       },
@@ -4057,11 +4219,11 @@
           },
           "currency": {
             "type": "string",
-            "description": "币种代码，不区分大小写。JPY 为日元，其余支持币种为百分之一单位。"
+            "description": "保存的付款币种代码；未记录时为空字符串。"
           },
           "fee_state": {
             "type": "string",
-            "description": "服务费状态。",
+            "description": "服务费状态：held 为冻结，released 为已释放或未冻结，charged 为已结算。",
             "enum": [
               "held",
               "released",
@@ -4094,23 +4256,31 @@
         "properties": {
           "number": {
             "type": "string",
-            "description": "卡号，仅数字字符串。",
-            "pattern": "^\\d{12,19}$"
+            "description": "卡号，仅数字字符串。 来源：由用户提供银行卡号，按数字字符串传入。",
+            "pattern": "^\\d{12,19}$",
+            "x-input-source": "由用户提供银行卡号，按数字字符串传入。",
+            "x-source-operations": []
           },
           "month": {
             "type": "string",
-            "description": "有效期月份，例如 01 或 1。",
-            "pattern": "^(0?[1-9]|1[0-2])$"
+            "description": "有效期月份，例如 01 或 1。 来源：来自用户银行卡有效期的月份，按字符串传入。",
+            "pattern": "^(0?[1-9]|1[0-2])$",
+            "x-input-source": "来自用户银行卡有效期的月份，按字符串传入。",
+            "x-source-operations": []
           },
           "year": {
             "type": "string",
-            "description": "有效期年份，两位或四位数字字符串。",
-            "pattern": "^(\\d{2}|\\d{4})$"
+            "description": "有效期年份，两位或四位数字字符串。 来源：来自用户银行卡有效期的年份，按字符串传入。",
+            "pattern": "^(\\d{2}|\\d{4})$",
+            "x-input-source": "来自用户银行卡有效期的年份，按字符串传入。",
+            "x-source-operations": []
           },
           "cvc": {
             "type": "string",
-            "description": "安全码，仅数字字符串。",
-            "pattern": "^\\d{3,4}$"
+            "description": "安全码，仅数字字符串。 来源：来自用户银行卡安全码，按字符串传入。",
+            "pattern": "^\\d{3,4}$",
+            "x-input-source": "来自用户银行卡安全码，按字符串传入。",
+            "x-source-operations": []
           }
         },
         "required": [
@@ -4126,18 +4296,31 @@
         "properties": {
           "workflow": {
             "type": "string",
-            "description": "subscription：订阅办理；link：仅生成结账链接，不自动付款。",
+            "description": "subscription：订阅办理；link：仅生成结账链接，不自动付款。 来源：调用方按业务选择：办理订阅传 subscription，仅生成结账链接传 link。",
             "enum": [
               "subscription",
               "link"
-            ]
+            ],
+            "x-input-source": "调用方按业务选择：办理订阅传 subscription，仅生成结账链接传 link。",
+            "x-source-operations": []
           },
           "product_id": {
             "type": "string",
-            "description": "从套餐列表取得的套餐编号。",
+            "description": "套餐接口标识：Pro 5x 传 pro5x，Pro 20x 传 pro20x，Team 标准传 team，Team 高级传 team_premium。实际开放及新增套餐以 GET /api/v1/catalog 的 items[].id 为准，按返回值原样传入。 来源：调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
             "minLength": 1,
             "maxLength": 80,
-            "pattern": "^[a-z0-9_]+$"
+            "pattern": "^[a-z0-9_]+$",
+            "examples": [
+              "pro20x",
+              "pro5x"
+            ],
+            "x-input-source": "调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
+            "x-source-operations": [
+              {
+                "operationId": "get_catalog",
+                "label": "GET /api/v1/catalog"
+              }
+            ]
           },
           "session": {
             "anyOf": [
@@ -4148,11 +4331,18 @@
                 "type": "string"
               }
             ],
-            "description": "账号最新完整 Session 对象或 JSON 字符串；建议保留 sessionToken 或 cookies，以支持登录态刷新。"
+            "description": "账号最新完整 Session 对象或 JSON 字符串；建议保留 sessionToken 或 cookies，以支持登录态刷新。 来源：由用户提供目标订阅账号登录后的完整 Session JSON；本 API 不生成 Session。POST /api/v1/session/inspect 只返回校验摘要，不能把该摘要作为 session 提交。",
+            "x-input-source": "由用户提供目标订阅账号登录后的完整 Session JSON；本 API 不生成 Session。POST /api/v1/session/inspect 只返回校验摘要，不能把该摘要作为 session 提交。",
+            "x-source-operations": [
+              {
+                "operationId": "inspect_session",
+                "label": "POST /api/v1/session/inspect"
+              }
+            ]
           },
           "country": {
             "type": "string",
-            "description": "订阅地区，使用套餐接口返回的地区代码。",
+            "description": "订阅地区，使用套餐接口返回的地区代码。 来源：调用 GET /api/v1/catalog，从 countries[].code 选择地区代码传入，例如 US；不要传 countries[].name 或 currency。省略时使用 PH。",
             "enum": [
               "PH",
               "US",
@@ -4162,38 +4352,55 @@
               "EG",
               "TR"
             ],
-            "default": "PH"
+            "default": "PH",
+            "x-input-source": "调用 GET /api/v1/catalog，从 countries[].code 选择地区代码传入，例如 US；不要传 countries[].name 或 currency。省略时使用 PH。",
+            "x-source-operations": [
+              {
+                "operationId": "get_catalog",
+                "label": "GET /api/v1/catalog"
+              }
+            ]
           },
           "seats": {
             "type": "integer",
-            "description": "总席位数；个人套餐使用 1。",
+            "description": "总席位数；个人套餐使用 1。 来源：由用户填写需要购买的总席位数；个人套餐填 1，团队套餐按所需人数填写。",
             "minimum": 1,
             "maximum": 100,
-            "default": 1
+            "default": 1,
+            "x-input-source": "由用户填写需要购买的总席位数；个人套餐填 1，团队套餐按所需人数填写。",
+            "x-source-operations": []
           },
           "premium_seats": {
             "type": "integer",
-            "description": "高级席位数，不能超过 seats。",
+            "description": "高级席位数，不能超过 seats。 来源：由用户填写高级席位数量，不超过 seats；无需高级席位配置时沿用默认值 1。",
             "minimum": 1,
             "maximum": 100,
-            "default": 1
+            "default": 1,
+            "x-input-source": "由用户填写高级席位数量，不超过 seats；无需高级席位配置时沿用默认值 1。",
+            "x-source-operations": []
           },
           "workspace_name": {
             "type": "string",
-            "description": "团队工作区名称；个人套餐可省略。",
+            "description": "团队工作区名称；个人套餐可省略。 来源：由用户填写团队工作区名称；个人套餐可省略。",
             "minLength": 1,
             "maxLength": 100,
-            "default": "work"
+            "default": "work",
+            "x-input-source": "由用户填写团队工作区名称；个人套餐可省略。",
+            "x-source-operations": []
           },
           "keep_renewal": {
             "type": "boolean",
             "default": false,
-            "description": "订阅办理成功后是否保留自动续费；false 表示申请关闭，结果以订单 renewal 为准。"
+            "description": "订阅办理成功后是否保留自动续费；false 表示申请关闭，结果以订单 renewal 为准。 来源：由用户选择是否保留自动续费，调用方转为 true 或 false；省略为 false。",
+            "x-input-source": "由用户选择是否保留自动续费，调用方转为 true 或 false；省略为 false。",
+            "x-source-operations": []
           },
           "accepted": {
             "type": "boolean",
             "default": false,
-            "description": "subscription 必须为 true，表示同意服务约定并授权按所选方案的实付金额付款。"
+            "description": "subscription 必须为 true，表示同意服务约定并授权按所选方案的实付金额付款。 来源：由用户明确同意本次服务和付款授权后传 true，不能根据 Session 检查结果自动推断同意。",
+            "x-input-source": "由用户明确同意本次服务和付款授权后传 true，不能根据 Session 检查结果自动推断同意。",
+            "x-source-operations": []
           },
           "card": {
             "anyOf": [
@@ -4204,7 +4411,9 @@
                 "type": "null"
               }
             ],
-            "description": "subscription 必填；link 必须省略或为 null。"
+            "description": "subscription 必填；link 必须省略或为 null。 来源：由获授权使用该卡的用户提供付款银行卡信息，不从套餐、报价或 Session 检查接口获取。",
+            "x-input-source": "由获授权使用该卡的用户提供付款银行卡信息，不从套餐、报价或 Session 检查接口获取。",
+            "x-source-operations": []
           }
         },
         "required": [
@@ -4218,7 +4427,8 @@
             "if": {
               "properties": {
                 "workflow": {
-                  "const": "subscription"
+                  "const": "subscription",
+                  "description": "订阅办理请求需满足附加的付款授权与卡片要求。"
                 }
               }
             },
@@ -4229,17 +4439,20 @@
               ],
               "properties": {
                 "accepted": {
-                  "const": true
+                  "const": true,
+                  "description": "订阅办理必须明确授权付款。"
                 },
                 "card": {
-                  "$ref": "#/components/schemas/Card"
+                  "$ref": "#/components/schemas/Card",
+                  "description": "订阅办理所需的完整卡片信息。"
                 }
               }
             },
             "else": {
               "properties": {
                 "card": {
-                  "type": "null"
+                  "type": "null",
+                  "description": "仅提链时不接受卡片信息。"
                 }
               }
             }
@@ -4279,12 +4492,21 @@
                 "type": "string"
               }
             ],
-            "description": "账号最新完整 Session 对象或 JSON 字符串；建议保留 sessionToken 或 cookies，以支持登录态刷新。"
+            "description": "账号最新完整 Session 对象或 JSON 字符串；建议保留 sessionToken 或 cookies，以支持登录态刷新。 来源：由用户提供目标订阅账号登录后的完整 Session JSON；本 API 不生成 Session。POST /api/v1/session/inspect 只返回校验摘要，不能把该摘要作为 session 提交。",
+            "x-input-source": "由用户提供目标订阅账号登录后的完整 Session JSON；本 API 不生成 Session。POST /api/v1/session/inspect 只返回校验摘要，不能把该摘要作为 session 提交。",
+            "x-source-operations": [
+              {
+                "operationId": "inspect_session",
+                "label": "POST /api/v1/session/inspect"
+              }
+            ]
           },
           "accepted": {
             "type": "boolean",
             "const": true,
-            "description": "必须为 true，表示授权关闭该账号的自动续费。"
+            "description": "必须为 true，表示授权关闭该账号的自动续费。 来源：用户明确授权关闭自动续费后，由调用方传 true。",
+            "x-input-source": "用户明确授权关闭自动续费后，由调用方传 true。",
+            "x-source-operations": []
           }
         },
         "required": [
@@ -4336,7 +4558,8 @@
         "type": "object",
         "properties": {
           "task": {
-            "$ref": "#/components/schemas/RenewalTask"
+            "$ref": "#/components/schemas/RenewalTask",
+            "description": "独立关闭续费任务的当前状态。"
           },
           "events": {
             "type": "array",
@@ -4357,7 +4580,8 @@
                   "format": "date-time"
                 }
               }
-            }
+            },
+            "description": "按时间顺序返回的续费处理说明。"
           }
         }
       },
@@ -4401,7 +4625,7 @@
               "integer",
               "null"
             ],
-            "description": "专属服务费，分 R；null 使用会员价格。"
+            "description": "账户通用服务费，分 R；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
           }
         }
       },
@@ -4445,10 +4669,11 @@
               "integer",
               "null"
             ],
-            "description": "专属服务费，分 R；null 使用会员价格。"
+            "description": "账户通用服务费，分 R；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
           },
           "membership": {
-            "$ref": "#/components/schemas/Membership"
+            "$ref": "#/components/schemas/Membership",
+            "description": "当前账户会员与专属计价信息。"
           }
         }
       },
@@ -4456,7 +4681,8 @@
         "type": "object",
         "properties": {
           "user": {
-            "$ref": "#/components/schemas/Account"
+            "$ref": "#/components/schemas/Account",
+            "description": "当前 API 密钥所属的序付账户。"
           },
           "stats": {
             "type": "object",
@@ -4481,13 +4707,15 @@
                 "type": "integer",
                 "description": "充值和兑换入账总额，分 R。"
               }
-            }
+            },
+            "description": "订单和资金汇总；已删除订单不计入订单数量，历史资金流水仍保留。"
           },
           "recent_orders": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Order"
-            }
+            },
+            "description": "最近 5 笔未删除订单，按创建时间倒序排列。"
           },
           "announcements": {
             "type": "array",
@@ -4511,7 +4739,8 @@
                   "description": "展示类别。"
                 }
               }
-            }
+            },
+            "description": "当前发布且处于展示时间内的公告。"
           }
         }
       },
@@ -4565,14 +4794,18 @@
         "properties": {
           "amount": {
             "type": "integer",
-            "description": "申请金额，分 R，至少 100；上限由站点配置决定。",
-            "minimum": 100
+            "description": "申请金额，分 R，至少 100；上限由站点配置决定。 来源：由用户填写充值金额，调用方转换为整数分 R；例如 10 R 传 1000。",
+            "minimum": 100,
+            "x-input-source": "由用户填写充值金额，调用方转换为整数分 R；例如 10 R 传 1000。",
+            "x-source-operations": []
           },
           "proof": {
             "type": "string",
-            "description": "充值凭证或备注，UTF-8 编码后最多 500 字节（通常最多 166 个汉字）。",
+            "description": "充值凭证或备注，UTF-8 编码后最多 500 字节（通常最多 166 个汉字）。 来源：由用户提供本次充值凭证文字或备注；无内容时可省略。",
             "maxLength": 500,
-            "default": ""
+            "default": "",
+            "x-input-source": "由用户提供本次充值凭证文字或备注；无内容时可省略。",
+            "x-source-operations": []
           }
         },
         "required": [
@@ -4646,14 +4879,16 @@
                     "description": "服务费，分 R。"
                   },
                   "price_snapshot": {
-                    "$ref": "#/components/schemas/PriceSnapshot"
+                    "$ref": "#/components/schemas/PriceSnapshot",
+                    "description": "关联订单下单时保存的价格快照。"
                   }
                 }
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "关联订单摘要；无关联或订单已被删除时为 null，资金流水仍保留。"
           },
           "payment": {
             "type": "object",
@@ -4668,7 +4903,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Order"
-            }
+            },
+            "description": "本页订单记录；无匹配结果时为空数组。"
           },
           "page": {
             "type": "integer",
@@ -4695,7 +4931,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RenewalTask"
-            }
+            },
+            "description": "本页续费任务记录；无匹配结果时为空数组。"
           },
           "page": {
             "type": "integer",
@@ -4722,7 +4959,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Topup"
-            }
+            },
+            "description": "本页充值申请记录；无匹配结果时为空数组。"
           },
           "page": {
             "type": "integer",
@@ -4749,7 +4987,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LedgerEntry"
-            }
+            },
+            "description": "本页资金流水记录；无匹配结果时为空数组。"
           },
           "page": {
             "type": "integer",
@@ -4796,9 +5035,10 @@
       "example": "subscription",
       "detail": "get_order",
       "steps": [
-        "查询套餐、服务费与余额；可用余额需足够冻结服务费。",
-        "填写完整 Session、银行卡、地区；accepted=true 表示授权办理。",
-        "保存返回的订单 id，每 5 秒查询订单详情。",
+        "调用 GET /api/v1/catalog：从 items[].id 取得 product_id，从 countries[].code 取得 country。",
+        "携带 product_id 调用 GET /api/v1/quote，读取 fee；再调用 GET /api/v1/wallet，确认 balance − frozen 足够冻结该服务费。报价 fee 只供核对，不用传入下单请求。",
+        "由用户提供完整 Session、银行卡与续费选择，确认授权；调用方生成并保存 Idempotency-Key，再 POST /api/v1/orders。",
+        "保存下单响应根级 id，将它替换进 GET /api/v1/orders/{id}，每 5 秒查询。",
         "分别确认 payment.state=succeeded、order.activation=active，以及 order.renewal=disabled 或 kept。"
       ]
     },
@@ -4809,8 +5049,8 @@
       "example": "link",
       "detail": "get_order",
       "steps": [
-        "选择套餐和地区，提交完整 Session；workflow=link，无需银行卡。",
-        "保存订单 id，每 5 秒查询。",
+        "调用 GET /api/v1/catalog，从 items[].id 取得 product_id，从 countries[].code 取得 country；用户提供完整 Session，workflow 选择 link。",
+        "POST /api/v1/orders 后保存响应根级 id，将它替换进 GET /api/v1/orders/{id}，每 5 秒查询。",
         "状态 awaiting_payment 且 checkout.ready=true 时取得 checkout.url，可停止轮询。",
         "链接由用户自行打开付款；平台不会通过这条提链接口自动扣卡或追踪外部付款成功。"
       ]
@@ -4822,11 +5062,121 @@
       "example": "cancel",
       "detail": "get_renewal",
       "steps": [
-        "提交目标账号最新 Session 和 accepted=true。",
-        "保存任务 id，每 5 秒查询续费任务详情。",
+        "用户提供目标账号最新完整 Session 并同意关闭续费；调用方生成 Idempotency-Key，POST /api/v1/renewals，accepted=true。",
+        "保存创建响应根级 id，将它替换进 GET /api/v1/renewals/{id}，每 5 秒查询；不要使用订阅订单编号。",
         "disabled 表示确认关闭；no_subscription 表示没有可关闭的订阅。",
         "review 表示待核实，按 message 联系支持；需要更新 Session 时使用新的请求标识。"
       ]
+    }
+  ],
+  "x-product-examples": [
+    {
+      "id": "pro5x",
+      "name": "Pro 5x"
+    },
+    {
+      "id": "pro20x",
+      "name": "Pro 20x"
+    },
+    {
+      "id": "team",
+      "name": "Team 标准"
+    },
+    {
+      "id": "team_premium",
+      "name": "Team 高级"
+    }
+  ],
+  "x-input-sources": [
+    {
+      "field": "Authorization",
+      "source": "网页「开发接入」创建 API 密钥",
+      "value": "Authorization: Bearer YOUR_API_KEY",
+      "links": []
+    },
+    {
+      "field": "product_id",
+      "source": "GET /api/v1/catalog → items[].id",
+      "value": "例如 pro20x；按同一条记录的 name 选择套餐。",
+      "links": [
+        {
+          "operationId": "get_catalog",
+          "label": "GET /api/v1/catalog"
+        }
+      ]
+    },
+    {
+      "field": "country",
+      "source": "GET /api/v1/catalog → countries[].code",
+      "value": "例如 US；不要传地区名称或币种。",
+      "links": [
+        {
+          "operationId": "get_catalog",
+          "label": "GET /api/v1/catalog"
+        }
+      ]
+    },
+    {
+      "field": "订单路径中的 {id}",
+      "source": "POST /api/v1/orders → id；GET /api/v1/orders → items[].id",
+      "value": "GET /api/v1/orders/ORDER_ID",
+      "links": [
+        {
+          "operationId": "create_order",
+          "label": "POST /api/v1/orders → id"
+        },
+        {
+          "operationId": "list_orders",
+          "label": "GET /api/v1/orders → items[].id"
+        }
+      ]
+    },
+    {
+      "field": "续费任务路径中的 {id}",
+      "source": "POST /api/v1/renewals → id；GET /api/v1/renewals → items[].id",
+      "value": "GET /api/v1/renewals/RENEWAL_ID",
+      "links": [
+        {
+          "operationId": "create_renewal",
+          "label": "POST /api/v1/renewals → id"
+        },
+        {
+          "operationId": "list_renewals",
+          "label": "GET /api/v1/renewals → items[].id"
+        }
+      ]
+    },
+    {
+      "field": "取消充值路径中的 {id}",
+      "source": "POST /api/v1/topups → id；GET /api/v1/topups → items[].id",
+      "value": "POST /api/v1/topups/TOPUP_ID/cancel",
+      "links": [
+        {
+          "operationId": "create_topup",
+          "label": "POST /api/v1/topups → id"
+        },
+        {
+          "operationId": "list_topups",
+          "label": "GET /api/v1/topups → items[].id"
+        }
+      ]
+    },
+    {
+      "field": "session",
+      "source": "用户提供目标账号的完整 Session JSON",
+      "value": "保留原对象；session/inspect 返回的是检查摘要，不能代替 Session。",
+      "links": [
+        {
+          "operationId": "inspect_session",
+          "label": "Session 检查接口"
+        }
+      ]
+    },
+    {
+      "field": "Idempotency-Key",
+      "source": "调用方首次提交前生成并保存，例如 UUID",
+      "value": "同一次操作的重试保持相同标识和内容。",
+      "links": []
     }
   ]
 }

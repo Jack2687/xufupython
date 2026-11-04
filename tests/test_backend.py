@@ -38,9 +38,10 @@ from backend.common import uid,digest,encrypt,decrypt,now
 from backend import renewals,proxies
 from backend.seed import DEFAULTS
 from test_customer_api import CustomerApiTests
+from test_admin_order_pricing import AdminOrderPricingTests
 
 
-class BackendTests(CustomerApiTests,unittest.TestCase):
+class BackendTests(AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -290,7 +291,7 @@ class BackendTests(CustomerApiTests,unittest.TestCase):
 
     def test_13_disabled_payment_and_frontend_authorized_changes(self):
         self.assertFalse(self.ok(self.client.get('/api/public'))['payment_connected'])
-        excluded=[('POST','/api/orders/fake/cancel'),('POST','/api/admin/orders/fake/close'),('POST','/api/admin/orders/fake/payment/check'),('POST','/api/orders/fake/payment/confirm')]
+        excluded=[('POST','/api/orders/fake/cancel'),('POST','/api/admin/orders/fake/payment/check'),('POST','/api/orders/fake/payment/confirm')]
         for method,path in excluded:self.assertEqual(self.client.request(method,path,json={}).status_code,404,path)
         tables={r['table_name'] for r in db.all("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")}
         self.assertFalse(tables & {'jobs','checkout_runs','payment_runs','subscription_protocol'})

@@ -9,11 +9,28 @@ export function schemaFields(spec:Row,value:Row={},prefix='',depth=0):Row[] {
   if(depth>5)return []
   const s=resolveSchema(spec,value)
   const object=s.properties?s:(s.anyOf||s.oneOf||[]).map((x:Row)=>resolveSchema(spec,x)).find((x:Row)=>x.properties)||s
+  if(!object.properties&&object.additionalProperties&&typeof object.additionalProperties==='object') {
+    const f=resolveSchema(spec,object.additionalProperties),name=prefix+'{product_id}'
+    return [{...f,name,nested:!!prefix},...schemaFields(spec,f,name+'.',depth+1)]
+  }
   return Object.entries(object.properties||{}).flatMap(([key,raw])=>{
     const f=resolveSchema(spec,raw as Row),name=prefix+key
     const item=f.items?resolveSchema(spec,f.items):null
     return [{...f,name,required:object.required?.includes(key),nested:!!prefix},...schemaFields(spec,item||f,name+(item?'[].':'.'),depth+1)]
   })
+}
+
+export function fieldRules(v:Row):string {
+  const rules:string[]=[]
+  if(v.default!==undefined)rules.push('默认：'+JSON.stringify(v.default))
+  if(v.minimum!==undefined)rules.push('最小：'+v.minimum)
+  if(v.maximum!==undefined)rules.push('最大：'+v.maximum)
+  if(v.minLength!==undefined)rules.push('最短 '+v.minLength+' 字符')
+  if(v.maxLength!==undefined)rules.push('最长 '+v.maxLength+' 字符')
+  if(v.pattern)rules.push('格式：'+v.pattern)
+  if(v.format)rules.push('格式：'+v.format)
+  if(v.examples?.length)rules.push('示例：'+JSON.stringify(v.examples[0]))
+  return rules.join('；')
 }
 
 export function fieldType(v:Row):string {

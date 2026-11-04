@@ -1,7 +1,7 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
-import {schemaFields,codeSample,requestExamples} from '../src/apiDocs.ts'
+import {schemaFields,codeSample,requestExamples,fieldRules} from '../src/apiDocs.ts'
 const spec=JSON.parse(readFileSync(new URL('../../backend/openapi.json',import.meta.url),'utf8'))
 const operations=Object.entries(spec.paths).flatMap(([path,v])=>Object.entries(v).map(([method,op])=>({path,method,op})))
 
@@ -10,6 +10,9 @@ test('nested references, union objects and arrays expose customer fields',()=>{
   for(const field of ['session.user.email','session.account.id','session.sessionToken','card.number','card.cvc'])assert.ok(order.some(f=>f.name===field),field)
   const list=schemaFields(spec,{$ref:'#/components/schemas/OrderPage'})
   assert.ok(list.some(f=>f.name==='items[].payment.state'))
+  const membership=schemaFields(spec,{$ref:'#/components/schemas/Membership'})
+  assert.ok(membership.some(f=>f.name==='product_prices.{product_id}'&&f.description&&f.minimum===0))
+  assert.ok(fieldRules(order.find(f=>f.name==='product_id')).includes('pro20x'))
 })
 
 test('all operations produce bounded, authenticated examples',()=>{
@@ -33,5 +36,6 @@ test('link and subscription examples remain separate and all guides resolve',()=
   const create=operations.find(x=>x.op.operationId==='create_order')
   assert.equal(requestExamples(create).link.value.card,undefined)
   assert.equal(requestExamples(create).subscription.value.accepted,true)
+  assert.equal(requestExamples(create).subscription.value.product_id,'pro20x')
   assert.ok(!codeSample(create,'https://pay.example.test','node','link').includes('YOUR_CARD_NUMBER'))
 })

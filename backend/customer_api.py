@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from . import db, membership, records, renewals, wallet
 from .common import body, config, current, member, require
+from .product_ids import public_order
 from .customer_contract import OrderRequest, RenewalRequest, TopupRequest, prepare, replay
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(member)])
@@ -11,9 +12,10 @@ router = APIRouter(prefix='/api/v1', dependencies=[Depends(member)])
 @router.post('/orders')
 async def create_order(request: Request):
     prepare(request, OrderRequest, await body(request))
-    old = db.one('SELECT id,status,request_hash FROM orders WHERE user_id=$1 AND idempotency_key=$2',
+    old = db.one('SELECT id,status,request_hash,deleted_at FROM orders WHERE user_id=$1 AND idempotency_key=$2',
                  current(request)['id'], request.headers['Idempotency-Key'])
     if old:
+        require(old['deleted_at'] is None, '原订单已删除；此请求标识不能再次下单', 409)
         require(old['request_hash'] == request.state.customer_hash,
                 '同一 Idempotency-Key 不能用于不同请求', 409)
         return {'id': old['id'], 'status': old['status'], 'replayed': True}
@@ -66,7 +68,9 @@ def me(request: Request):
 
 @router.get('/overview')
 def overview(request: Request):
-    return records.overview(request)
+    result = records.overview(request)
+    for row in result['recent_orders']:public_order(row, request)
+    return result
 
 
 @router.get('/wallet/ledger')
