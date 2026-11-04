@@ -227,7 +227,7 @@
                     },
                     "unit": {
                       "type": "string",
-                      "description": "服务费单位：cent_R。"
+                      "description": "服务费为积分；unit 的兼容标识为 cent_R，数值展示时除以 100。"
                     },
                     "countries": {
                       "type": "array",
@@ -459,12 +459,12 @@
                   "properties": {
                     "fee": {
                       "type": "integer",
-                      "description": "当前账户服务费，单位：分 R（100 分 R = 1 R）。",
+                      "description": "当前账户服务费，单位：积分最小单位（展示时除以 100）。",
                       "minimum": 0
                     },
                     "standard": {
                       "type": "integer",
-                      "description": "标准服务费，单位：分 R（100 分 R = 1 R）。",
+                      "description": "标准服务费，单位：积分最小单位（展示时除以 100）。",
                       "minimum": 0
                     },
                     "membership": {
@@ -711,12 +711,12 @@
                           },
                           "fee": {
                             "type": "integer",
-                            "description": "标准服务费，单位：分 R（100 分 R = 1 R）。",
+                            "description": "标准服务费，单位：积分最小单位（展示时除以 100）。",
                             "minimum": 0
                           },
                           "member_fee": {
                             "type": "integer",
-                            "description": "当前账户服务费，单位：分 R（100 分 R = 1 R）。",
+                            "description": "当前账户服务费，单位：积分最小单位（展示时除以 100）。",
                             "minimum": 0
                           },
                           "enabled": {
@@ -725,7 +725,7 @@
                           },
                           "saved": {
                             "type": "integer",
-                            "description": "标准服务费减去当前账户服务费，分 R；专属价高于标准价时可能为负数。"
+                            "description": "标准服务费减去当前账户服务费，积分最小单位；专属价高于标准价时可能为负数。"
                           },
                           "price_source": {
                             "type": "string",
@@ -760,7 +760,7 @@
                           },
                           "spent": {
                             "type": "integer",
-                            "description": "本单已结算服务费，单位：分 R（100 分 R = 1 R）。",
+                            "description": "本单已结算服务费，单位：积分最小单位（展示时除以 100）。",
                             "minimum": 0
                           }
                         }
@@ -769,7 +769,7 @@
                     },
                     "unit": {
                       "type": "string",
-                      "description": "服务费单位：cent_R。"
+                      "description": "服务费为积分；unit 的兼容标识为 cent_R，数值展示时除以 100。"
                     },
                     "basis": {
                       "type": "string",
@@ -1164,7 +1164,7 @@
                     },
                     "amount": {
                       "type": "integer",
-                      "description": "本次入账金额，单位：分 R（100 分 R = 1 R）。",
+                      "description": "本次入账金额，单位：积分最小单位（展示时除以 100）。",
                       "minimum": 0
                     }
                   }
@@ -2914,7 +2914,7 @@
       "get": {
         "operationId": "list_ledger",
         "summary": "查询资金流水",
-        "description": "按流水编号倒序分页；包含冻结、解冻、扣费和入账。金额单位为分 R，历史流水不会因当前价格变更而重算。",
+        "description": "按流水编号倒序分页；包含冻结、解冻、扣费和入账。金额单位为积分最小单位，历史流水不会因当前价格变更而重算。",
         "tags": [
           "资金与充值"
         ],
@@ -3669,7 +3669,7 @@
           },
           "threshold": {
             "type": "integer",
-            "description": "累计消费门槛，单位：分 R（100 分 R = 1 R）。",
+            "description": "累计消费门槛，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "discount": {
@@ -3706,12 +3706,12 @@
           },
           "spent": {
             "type": "integer",
-            "description": "已结算服务费累计消费，单位：分 R（100 分 R = 1 R）。",
+            "description": "已结算服务费累计消费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "remaining": {
             "type": "integer",
-            "description": "距下一等级所需消费，单位：分 R（100 分 R = 1 R）。",
+            "description": "距下一等级所需消费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "progress": {
@@ -3739,7 +3739,7 @@
               "integer",
               "null"
             ],
-            "description": "账户通用服务费，分 R；优先使用套餐专属价，其次此值，均未设置时使用会员折扣。"
+            "description": "账户通用服务费，积分最小单位；优先使用套餐专属价，其次此值，均未设置时使用会员折扣。"
           },
           "tiers": {
             "type": "array",
@@ -3750,11 +3750,11 @@
           },
           "product_prices": {
             "type": "object",
-            "description": "该账户设置的套餐专属服务费，键为套餐接口标识，值为分 R；0 为有效免费价，缺少该键表示沿用账户通用价或会员折扣。",
+            "description": "该账户设置的套餐专属服务费，键为套餐接口标识，值为积分最小单位；0 为有效免费价，缺少该键表示沿用账户通用价或会员折扣。",
             "additionalProperties": {
               "type": "integer",
               "minimum": 0,
-              "description": "此套餐的专属服务费，分 R。"
+              "description": "此套餐的专属服务费，积分最小单位。"
             },
             "examples": [
               {
@@ -3890,12 +3890,12 @@
           },
           "fee": {
             "type": "integer",
-            "description": "标准服务费，单位：分 R（100 分 R = 1 R）。",
+            "description": "标准服务费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "member_fee": {
             "type": "integer",
-            "description": "当前账户实际服务费，分 R；优先使用套餐专属价，其次账户通用价，最后会员折扣。",
+            "description": "当前账户实际服务费，积分最小单位；优先使用套餐专属价，其次账户通用价，最后会员折扣。",
             "minimum": 0
           },
           "features": {
@@ -3926,12 +3926,12 @@
         "properties": {
           "standard": {
             "type": "integer",
-            "description": "下单时标准服务费，单位：分 R（100 分 R = 1 R）。",
+            "description": "下单时标准服务费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "member_fee": {
             "type": "integer",
-            "description": "本单服务费，单位：分 R（100 分 R = 1 R）。",
+            "description": "本单服务费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "membership": {
@@ -4045,7 +4045,7 @@
           },
           "fee": {
             "type": "integer",
-            "description": "本单服务费，单位：分 R（100 分 R = 1 R）。",
+            "description": "本单服务费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "source": {
@@ -4106,6 +4106,16 @@
           "queue_message": {
             "type": "string",
             "description": "排队任务暂不可执行时的说明，按需返回。"
+          },
+          "progress_stage": {
+            "type": "string",
+            "description": "当前办理环节，仅用于进度显示；实际结果以 status、activation、renewal 为准。",
+            "enum": [
+              "preparation",
+              "payment",
+              "activation",
+              "renewal"
+            ]
           }
         }
       },
@@ -4164,12 +4174,12 @@
         "properties": {
           "balance": {
             "type": "integer",
-            "description": "账户总余额，单位：分 R（100 分 R = 1 R）。",
+            "description": "账户总余额，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "frozen": {
             "type": "integer",
-            "description": "冻结服务费，单位：分 R（100 分 R = 1 R）。",
+            "description": "冻结服务费，单位：积分最小单位（展示时除以 100）。",
             "minimum": 0
           },
           "fee_override": {
@@ -4177,11 +4187,11 @@
               "integer",
               "null"
             ],
-            "description": "账户通用服务费，分 R；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
+            "description": "账户通用服务费，积分最小单位；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
           },
           "unit": {
             "type": "string",
-            "description": "金额单位。",
+            "description": "兼容协议标识 cent_R；金额含义为积分最小单位，页面展示时除以 100。",
             "enum": [
               "cent_R"
             ]
@@ -4610,11 +4620,11 @@
           },
           "balance": {
             "type": "integer",
-            "description": "账户余额，分 R。"
+            "description": "账户余额，积分最小单位。"
           },
           "frozen": {
             "type": "integer",
-            "description": "冻结服务费，分 R。"
+            "description": "冻结服务费，积分最小单位。"
           },
           "invite_code": {
             "type": "string",
@@ -4625,7 +4635,7 @@
               "integer",
               "null"
             ],
-            "description": "账户通用服务费，分 R；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
+            "description": "账户通用服务费，积分最小单位；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
           }
         }
       },
@@ -4654,11 +4664,11 @@
           },
           "balance": {
             "type": "integer",
-            "description": "账户余额，分 R。"
+            "description": "账户余额，积分最小单位。"
           },
           "frozen": {
             "type": "integer",
-            "description": "冻结服务费，分 R。"
+            "description": "冻结服务费，积分最小单位。"
           },
           "invite_code": {
             "type": "string",
@@ -4669,7 +4679,7 @@
               "integer",
               "null"
             ],
-            "description": "账户通用服务费，分 R；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
+            "description": "账户通用服务费，积分最小单位；null 表示未设置。套餐专属价优先，其次此值，最后会员折扣。"
           },
           "membership": {
             "$ref": "#/components/schemas/Membership",
@@ -4701,11 +4711,11 @@
               },
               "used": {
                 "type": "integer",
-                "description": "累计已扣服务费，分 R。"
+                "description": "累计已扣服务费，积分最小单位。"
               },
               "credited": {
                 "type": "integer",
-                "description": "充值和兑换入账总额，分 R。"
+                "description": "充值和兑换入账总额，积分最小单位。"
               }
             },
             "description": "订单和资金汇总；已删除订单不计入订单数量，历史资金流水仍保留。"
@@ -4753,7 +4763,7 @@
           },
           "amount": {
             "type": "integer",
-            "description": "申请充值金额，分 R。"
+            "description": "申请充值金额，积分最小单位。"
           },
           "method": {
             "type": "string",
@@ -4794,9 +4804,9 @@
         "properties": {
           "amount": {
             "type": "integer",
-            "description": "申请金额，分 R，至少 100；上限由站点配置决定。 来源：由用户填写充值金额，调用方转换为整数分 R；例如 10 R 传 1000。",
+            "description": "申请金额，积分最小单位，至少 100；上限由站点配置决定。 来源：由用户填写充值金额，调用方转换为整数积分最小单位；例如 10 积分 传 1000。",
             "minimum": 100,
-            "x-input-source": "由用户填写充值金额，调用方转换为整数分 R；例如 10 R 传 1000。",
+            "x-input-source": "由用户填写充值金额，调用方转换为整数积分最小单位；例如 10 积分 传 1000。",
             "x-source-operations": []
           },
           "proof": {
@@ -4826,23 +4836,23 @@
           },
           "amount": {
             "type": "integer",
-            "description": "本次账面变动，分 R，允许负值；冻结类记录可能为 0。"
+            "description": "本次账面变动，积分最小单位，允许负值；冻结类记录可能为 0。"
           },
           "balance_after": {
             "type": "integer",
-            "description": "记录后的余额，分 R。"
+            "description": "记录后的账户总余额，积分最小单位；记录后的可用余额为 balance_after - frozen_after。"
           },
           "frozen_after": {
             "type": "integer",
-            "description": "记录后的冻结额，分 R。"
+            "description": "记录后的冻结额，积分最小单位。"
           },
           "available_delta": {
             "type": "integer",
-            "description": "服务端记录的余额变化展示值，分 R；当前可用额以 wallet 的 balance − frozen 计算。"
+            "description": "本条与前条记录的可用余额之差，积分最小单位。冻结为负，解冻为正；从冻结金额结算服务费时可用变动为 0。"
           },
           "frozen_delta": {
             "type": "integer",
-            "description": "冻结额变化，分 R。"
+            "description": "冻结额变化，积分最小单位。"
           },
           "description": {
             "type": "string",
@@ -4876,7 +4886,7 @@
                   },
                   "fee": {
                     "type": "integer",
-                    "description": "服务费，分 R。"
+                    "description": "服务费，积分最小单位。"
                   },
                   "price_snapshot": {
                     "$ref": "#/components/schemas/PriceSnapshot",
@@ -4892,7 +4902,35 @@
           },
           "payment": {
             "type": "object",
-            "description": "兼容字段，当前为空对象。"
+            "description": "关联订单保留的付款金额与卡尾号；无付款记录或订单已删除时为空对象。",
+            "properties": {
+              "last4": {
+                "type": "string",
+                "description": "付款银行卡尾号。"
+              },
+              "amount": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "订单保存的订阅付款金额，使用对应币种最小单位。"
+              },
+              "currency": {
+                "type": "string",
+                "description": "订单保存的订阅付款币种。"
+              },
+              "charged_amount": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "订单已确认付款时的保存金额；未确认付款为 null，不代表银行另行提供的结算回单。"
+              },
+              "charged_currency": {
+                "type": "string",
+                "description": "已确认付款的币种；未确认时为空字符串。"
+              }
+            }
           }
         }
       },

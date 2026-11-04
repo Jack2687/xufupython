@@ -16,7 +16,7 @@ RANGES = {
  'proxy': {'request_timeout_seconds':(10,120)}, 'site': {'invite_rate':(0,0)}
 }
 RANGES['payment']['post_payment_delay_seconds'] = (0,MAX_SECONDS)
-OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds'}}
+OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds','cslive_go_visit_return','cslive_go_refresh_before_renewal'}}
 
 
 def validate_config(key, v):
@@ -33,6 +33,8 @@ def validate_config(key, v):
     if key=='scheduler':
         require(v['default_country'] in COUNTRIES and v['link_mode']=='long' and v['engine'] in ('not_connected','checkout'),'调度配置无效')
     if key=='payment':
+        for name in ('cslive_go_visit_return','cslive_go_refresh_before_renewal'):
+            if name in v: require(type(v[name]) is bool, name+' 必须为开关')
         # Retired flow identifiers must not be accepted from older clients.
         for name in ('subscription_flow','checkout_flow'):
             if name in v: require(isinstance(v[name],str) and length(v[name])<=80,'流程配置无效')
@@ -83,6 +85,8 @@ def validate_config(key, v):
 def settings():
     result = {r['key']:r['value'] for r in db.all('SELECT key,value FROM settings ORDER BY key')}
     result['payment'].setdefault('post_payment_delay_seconds', DEFAULT_SECONDS)
+    for name in ('cslive_go_visit_return','cslive_go_refresh_before_renewal'):
+        result['payment'].setdefault(name, True)
     return result
 
 

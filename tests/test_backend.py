@@ -40,9 +40,10 @@ from backend.seed import DEFAULTS
 from test_customer_api import CustomerApiTests
 from test_admin_order_pricing import AdminOrderPricingTests
 from test_payment_delay_settings import PaymentDelaySettingsTests
+from test_experience import ExperienceTests
 
 
-class BackendTests(PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -697,7 +698,7 @@ class BackendTests(PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiT
             async def join_thread(join,*args):
                 return join(*args)
             async def exercise():
-                with patch.object(main.db,'initialize'), patch.object(main,'seed'), patch.object(main.db,'close'), patch.object(main.threading,'Thread') as thread, patch.object(main.asyncio,'to_thread',side_effect=join_thread):
+                with patch.object(main.order_updates.updates,'start'), patch.object(main.order_updates.updates,'close'), patch.object(main.db,'initialize'), patch.object(main,'seed'), patch.object(main.db,'close'), patch.object(main.threading,'Thread') as thread, patch.object(main.asyncio,'to_thread',side_effect=join_thread):
                     async with main.lifespan(app):
                         thread.return_value.start.assert_called_once()
                         self.assertEqual(thread.call_args.kwargs['name'],'xufu-scheduler')

@@ -48,7 +48,7 @@ onMounted(async()=>{try{spec.value=await api('/openapi.json');await nextTick();i
     </section>
     <section id="auth" class="panel docs-section">
       <h2>鉴权与数据约定</h2><p>请求携带 <code>Authorization: Bearer YOUR_API_KEY</code>。密钥只能操作所属序付账户的数据；目标订阅账号由请求中的 Session 指定。密钥只在创建时显示一次，撤销后失效。</p>
-      <p>余额与平台服务费以分 R 计价，100 分 R = 1 R，可用余额为 <code>balance − frozen</code>。</p>
+      <p>可用余额为 <code>balance − frozen</code>。</p>
       <p>套餐以 <code>GET /api/v1/catalog</code> 返回的 <code>items[].id</code> 为准，作为报价和下单的 <code>product_id</code>。Pro 20x 使用 <code>pro20x</code>；后续开放的新套餐同样传对应标识。</p><p>服务费优先使用该套餐专属价，其次账户通用价，否则使用会员折扣；<code>price_source</code> 说明本次计价来源。专属价为 0 也有效。</p><p>使用 HTTPS 从服务端调用；密钥、Session、银行卡及兑换码不要放入 URL、前端代码或日志。接口不开放跨域浏览器调用。</p>
       <p>Session 检查仅核对格式、账号与有效期，不验证上游登录和订阅状态。办理时请提供最新完整 Session，并保留其中的 sessionToken 或会话 Cookie，以便需要时刷新登录态。</p>
     </section>

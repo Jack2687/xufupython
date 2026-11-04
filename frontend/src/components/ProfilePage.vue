@@ -2,6 +2,7 @@
 import {computed,onMounted,onUnmounted,ref} from 'vue'
 import {ArrowUpRight,ArrowRight,Check,Copy,KeyRound,LogOut,Pencil,RefreshCw,ShieldCheck,Wallet,ReceiptText,Clock3,TrendingUp} from 'lucide-vue-next'
 import {api,action,cash,date,labels,orderLabel,orderTone,renewalAttention,copy,notify,type Row} from '../lib'
+import {useOrderUpdates,serialRefresh} from '../orderUpdates'
 import DataTable from './DataTable.vue'
 import Modal from './Modal.vue'
 
@@ -17,9 +18,9 @@ const metrics=computed(()=>[
  {key:'orders',name:'订阅订单',value:summary.value.orders,unit:'笔',icon:ReceiptText,note:'全部订阅记录'},
  {key:'succeeded',name:'已完成办理',value:summary.value.succeeded,unit:'笔',icon:Check,note:'已确认完成的服务'},
  {key:'pending',name:'待完成订单',value:summary.value.pending,unit:'笔',icon:Clock3,note:'草稿、排队及办理中的方案'},
- {key:'used',name:'累计服务消费',value:cash(summary.value.used),unit:'R',icon:TrendingUp,note:'按实际服务扣费统计'}
+ {key:'used',name:'累计服务消费',value:cash(summary.value.used),unit:'积分',icon:TrendingUp,note:'按实际服务扣费统计'}
 ])
-let controller:AbortController|undefined,timer:ReturnType<typeof setInterval>
+let controller:AbortController|undefined
 async function load(){
  if(loading.value)return
  controller=new AbortController();loading.value=true;error.value=''
@@ -43,8 +44,10 @@ async function save(){
   if(result.relogin){notify('密码已更新，请重新登录');emit('logout')}else{notify('称呼已更新');emit('refresh')}
  }catch(e){formError.value=(e as Error).message}finally{busy.value=false}
 }
-onMounted(()=>{load();timer=setInterval(()=>{if(document.visibilityState==='visible'&&!modal.value)load()},15000)})
-onUnmounted(()=>{clearInterval(timer);controller?.abort()})
+const refreshOrders=serialRefresh(load)
+useOrderUpdates(()=>{if(!modal.value)void refreshOrders()})
+onMounted(load)
+onUnmounted(()=>controller?.abort())
 </script>
 
 <template>
@@ -57,20 +60,20 @@ onUnmounted(()=>{clearInterval(timer);controller?.abort()})
   <div class="profile-overview">
    <section class="profile-identity">
     <div class="profile-person"><span class="profile-avatar">{{user.name.slice(0,1)}}</span><div><h2>{{user.name}}</h2><div class="profile-email"><span>{{user.email}}</span><button @click="action(()=>copy(user.email))" aria-label="复制账户邮箱"><Copy :size="13"/></button></div></div><button class="profile-edit" @click="open('name')" aria-label="编辑称呼" title="编辑称呼"><Pencil :size="16"/></button></div>
-    <div class="profile-balance"><span>账户可用金额</span><strong>{{cash(user.balance)}}<small>R</small></strong><p>冻结金额 <b>{{cash(user.frozen)}} R</b></p></div>
+    <div class="profile-balance"><span>账户可用金额</span><strong>{{cash(Number(user.balance||0)-Number(user.frozen||0))}}<small>积分</small></strong><p>冻结金额 <b>{{cash(user.frozen)}} 积分</b></p></div>
     <div class="profile-identity-foot"><span><ShieldCheck :size="15"/>{{user.role==='admin'?'管理员账户':'客户账户'}}</span><a href="#/wallet">管理资金<ArrowUpRight :size="16"/></a></div>
    </section>
    <div class="profile-metrics"><article v-for="m in metrics" :key="m.key" class="panel profile-metric"><div><span>{{m.name}}</span><component :is="m.icon" :size="17"/></div><strong>{{loaded?m.value:'—'}}<small>{{m.unit}}</small></strong><p>{{m.note}}</p></article></div>
   </div>
   <section v-if="membership" class="panel profile-membership">
-   <div class="profile-tier"><span class="profile-tier-emblem"><ShieldCheck :size="23"/><b>{{membership.current.code}}</b></span><div><span class="eyebrow">MEMBERSHIP</span><h2>{{membership.current.name}}</h2><p>{{membership.fee_override!=null?'专属服务单价 '+cash(membership.fee_override)+' R / 次':'服务费减免 '+(100-membership.current.discount)+'%'}}</p></div></div>
-   <div class="profile-growth"><div><span>会员成长</span><b>{{cash(membership.spent)}} <small>R 有效消费</small></b></div><div class="profile-growth-track" role="progressbar" aria-label="账户会员成长" :aria-valuenow="membership.progress" aria-valuemin="0" aria-valuemax="100"><i :style="{width:membership.progress+'%'}"></i></div><p v-if="membership.next">距离自动升级至 <b>{{membership.next.name}}</b>，还需 {{cash(membership.remaining)}} R</p><p v-else>已达到最高自动等级</p><small v-if="membership.source==='manual'">当前为运营指定等级 · 自动等级 {{membership.automatic.name}}{{membership.until?' · 有效至 '+date(membership.until):''}}</small></div>
+   <div class="profile-tier"><span class="profile-tier-emblem"><ShieldCheck :size="23"/><b>{{membership.current.code}}</b></span><div><span class="eyebrow">MEMBERSHIP</span><h2>{{membership.current.name}}</h2><p>{{membership.fee_override!=null?'专属服务单价 '+cash(membership.fee_override)+' 积分 / 次':'服务费减免 '+(100-membership.current.discount)+'%'}}</p></div></div>
+   <div class="profile-growth"><div><span>会员成长</span><b>{{cash(membership.spent)}} <small>积分 有效消费</small></b></div><div class="profile-growth-track" role="progressbar" aria-label="账户会员成长" :aria-valuenow="membership.progress" aria-valuemin="0" aria-valuemax="100"><i :style="{width:membership.progress+'%'}"></i></div><p v-if="membership.next">距离自动升级至 <b>{{membership.next.name}}</b>，还需 {{cash(membership.remaining)}} 积分</p><p v-else>已达到最高自动等级</p><small v-if="membership.source==='manual'">当前为运营指定等级 · 自动等级 {{membership.automatic.name}}{{membership.until?' · 有效至 '+date(membership.until):''}}</small></div>
    <a class="profile-member-link" href="#/membership">查看权益<ArrowRight :size="16"/></a>
   </section>
   <section class="panel profile-records">
    <div class="profile-records-heading"><div><span class="eyebrow">YOUR ACTIVITY</span><h2>订阅记录</h2><p>最近 200 笔记录，可按状态和服务方案筛选。</p></div><button class="btn secondary" @click="load" :disabled="loading"><RefreshCw :size="15" :class="{spinning:loading}"/>刷新记录</button></div>
    <div class="profile-record-filters"><div class="tabs"><button v-for="[id,label] in tabs" :key="id" :class="{active:tab===id}" @click="tab=id">{{label}}</button></div><select v-model="product" aria-label="筛选服务方案"><option value="">所有服务方案</option><option v-for="[id,label] in products" :key="id" :value="id">{{label}}</option></select></div>
-   <DataTable :searchable="true" :rows="filtered" :columns="columns"><template #account="{row}"><b>{{row.email}}</b><small class="mono">{{row.id.slice(0,16)}}</small></template><template #fee="{row}">{{cash(row.fee)}} R</template><template #status="{row}"><span class="badge order-status" :class="orderTone(row)">{{orderLabel(row)}}</span></template><template #updated_at="{row}">{{date(row.updated_at)}}</template><template #action="{row}"><button class="text-btn" @click="emit('order',row)">查看进度<ArrowUpRight :size="13"/></button></template></DataTable>
+   <DataTable :searchable="true" :rows="filtered" :columns="columns"><template #account="{row}"><b>{{row.email}}</b><small class="mono">{{row.id.slice(0,16)}}</small></template><template #fee="{row}">{{cash(row.fee)}} 积分</template><template #status="{row}"><span class="badge order-status" :class="orderTone(row)">{{orderLabel(row)}}</span></template><template #updated_at="{row}">{{date(row.updated_at)}}</template><template #action="{row}"><button class="text-btn" @click="emit('order',row)">查看进度<ArrowUpRight :size="13"/></button></template></DataTable>
   </section>
   <Modal v-if="modal" :title="modal==='name'?'编辑称呼':'修改登录密码'" @close="close"><form @submit.prevent="save"><div v-if="formError" class="alert danger" role="alert">{{formError}}</div><template v-if="modal==='name'"><label>账户邮箱<input readonly :value="user.email"/></label><label>称呼<input v-model="name" required maxlength="80" autocomplete="nickname"/></label></template><template v-else><p class="muted small profile-password-note">使用至少 10 位的新密码，更新后需要重新登录。</p><label>当前密码<input v-model="oldPassword" type="password" required autocomplete="current-password"/></label><label>新密码<input v-model="newPassword" type="password" required minlength="10" maxlength="72" autocomplete="new-password"/></label><label>确认新密码<input v-model="confirmPassword" type="password" required minlength="10" maxlength="72" autocomplete="new-password"/></label></template><button class="btn primary full" :disabled="busy">{{busy?'保存中…':'保存修改'}}<Check :size="16"/></button></form></Modal>
  </div>

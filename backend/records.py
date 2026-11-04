@@ -33,6 +33,14 @@ def _order_history(id, technical=False):
     return {'events':events,'trace':trace if technical else []}
 
 
+def _progress_stage(id):
+    phase = db.scalar("SELECT phase FROM payment_trace_events WHERE order_id=$1 AND phase NOT IN ('network','funds','complete') ORDER BY id DESC LIMIT 1", id)
+    if phase in ('card_prepare','confirming','submitted','checking','result','verification'): return 'payment'
+    if phase in ('activation','session_refresh'): return 'activation'
+    if phase == 'renewal': return 'renewal'
+    return 'preparation'
+
+
 def _billing_details(snapshot):
     if not snapshot:
         return {'state':'not_selected'}
@@ -70,6 +78,11 @@ def overview(request:Request):
     return {'user':user,'stats':stats,'recent_orders':db.all('SELECT '+ORDER_FIELDS+' FROM orders o WHERE user_id=$1 AND o.deleted_at IS NULL ORDER BY created_at DESC LIMIT 5',user['id']),'announcements':db.all(ANN+' ORDER BY sort,created_at DESC')}
 
 
+@router.get('/announcements')
+def announcements():
+    return {'items':db.all(ANN.replace('id,title,body,tone','id,title,body,tone,starts_at,ends_at,created_at')+' ORDER BY sort,created_at DESC')}
+
+
 @router.get('/orders')
 @router.get('/v1/orders')
 def orders(request:Request,q:str='',status:str='',workflow:str='',page:int=Query(1,ge=1,le=100000),page_size:int=Query(200,ge=1,le=200)):
@@ -90,6 +103,7 @@ def orders(request:Request,q:str='',status:str='',workflow:str='',page:int=Query
 def order_detail(id:str,request:Request):
     row=db.one('SELECT '+ORDER_FIELDS+' FROM orders o WHERE id=$1 AND user_id=$2 AND o.deleted_at IS NULL',id,current(request)['id'])
     require(row,'订单不存在',404)
+    row['progress_stage'] = _progress_stage(id)
     if row['status']=='queued':row['queue_message']=queue_message(row.get('workflow'))
     payment={};checkout={}
     if row.get('workflow') in ('subscription','link'):
@@ -178,6 +192,7 @@ def admin_orders(q:str='',status:str='',page:int=Query(1,ge=1,le=100000),page_si
 def admin_detail(id:str):
     row=db.one('SELECT '+ORDER_FIELDS+',o.user_id,o.note,u.email AS owner FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.deleted_at IS NULL',id)
     require(row,'订单不存在',404)
+    row['progress_stage'] = _progress_stage(id)
     if row['status']=='queued':row['queue_message']=queue_message(row.get('workflow'))
     payment={};checkout={};billing={'state':'not_selected'};checkout_links=[]
     if row.get('workflow') in ('subscription','link'):

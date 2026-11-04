@@ -11,14 +11,19 @@ LEDGER_QUERY="""WITH history AS (
  FROM ledger WHERE user_id=$1
 ), recent AS (SELECT * FROM history ORDER BY id DESC LIMIT 300)
  SELECT l.id,l.kind,l.amount,l.balance_after,l.frozen_after,l.description,l.created_at,
- CASE WHEN l.previous_balance IS NOT NULL THEN l.balance_after-l.previous_balance
+ CASE WHEN l.previous_balance IS NOT NULL THEN (l.balance_after-l.frozen_after)-(l.previous_balance-l.previous_frozen)
  WHEN l.kind='freeze' THEN -o.fee WHEN l.kind='unfreeze' THEN o.fee
  WHEN l.kind='charge' AND l.reference LIKE 'payment:%' THEN 0 ELSE l.amount END AS available_delta,
  CASE WHEN l.previous_frozen IS NOT NULL THEN l.frozen_after-l.previous_frozen
  WHEN l.kind='freeze' THEN o.fee WHEN l.kind='unfreeze' THEN -o.fee
  WHEN l.kind='charge' AND l.reference LIKE 'payment:%' THEN l.amount ELSE 0 END AS frozen_delta,
  CASE WHEN o.id IS NULL OR o.deleted_at IS NOT NULL THEN NULL ELSE jsonb_build_object('id',o.id,'product_name',o.product_name,'email',o.email,'country',o.country,'fee',o.fee,'price_snapshot',o.price_snapshot) END AS related_order,
- '{}'::jsonb AS payment FROM recent l LEFT JOIN orders o ON o.id=l.order_id AND o.user_id=$1 ORDER BY l.id DESC"""
+ CASE WHEN o.id IS NULL OR o.deleted_at IS NOT NULL OR s.order_id IS NULL THEN '{}'::jsonb
+ ELSE jsonb_build_object('last4',s.payment_last4,'amount',s.payment_amount,'currency',s.payment_currency,
+ 'charged_amount',CASE WHEN s.paid_at IS NOT NULL THEN s.payment_amount ELSE NULL END,
+ 'charged_currency',CASE WHEN s.paid_at IS NOT NULL THEN s.payment_currency ELSE '' END) END AS payment
+ FROM recent l LEFT JOIN orders o ON o.id=l.order_id AND o.user_id=$1
+ LEFT JOIN subscription_runs s ON s.order_id=o.id ORDER BY l.id DESC"""
 
 
 def credit(q,request,user_id,kind,reference,description,amount):
@@ -35,7 +40,30 @@ def credit(q,request,user_id,kind,reference,description,amount):
 def wallet(request: Request):
     user=current(request)
     ledger=db.all(LEDGER_QUERY,user['id'])
-    return {'balance':user['balance'],'frozen':user['frozen'],'ledger':ledger,'topups':db.all('SELECT * FROM topups WHERE user_id=$1 ORDER BY created_at DESC LIMIT 200',user['id'])}
+    return {'balance':user['balance'],'frozen':user['frozen'],'ledger':ledger,'topups':db.all('SELECT * FROM topups WHERE user_id=$1 ORDER BY created_at DESC LIMIT 200',user['id']),
+            'recharges':db.all(RECHARGE_QUERY,user['id'])}
+
+
+# A read-only projection of existing credits; redeeming never creates a second
+# accounting entry or an artificial manual topup. Keep /v1/topups unchanged.
+RECHARGE_QUERY="""WITH credits AS (
+ SELECT id,kind,amount,balance_after,frozen_after,reference,description,created_at,
+ lag(balance_after-frozen_after) OVER (ORDER BY id) AS previous_available,
+ lag(frozen_after) OVER (ORDER BY id) AS previous_frozen FROM ledger WHERE user_id=$1
+), history AS (
+ SELECT 'redeem:'||l.id AS id,'redeem' AS source,'approved' AS status,l.amount,
+ COALESCE(l.balance_after-l.frozen_after-l.previous_available,l.amount) AS available_delta,
+ COALESCE(l.frozen_after-l.previous_frozen,0) AS frozen_delta,l.balance_after,l.frozen_after,
+ COALESCE(c.prefix,'已兑换（历史记录）') AS related,l.description,l.created_at,NULL::text AS topup_id
+ FROM credits l LEFT JOIN redeem_codes c ON l.reference='redeem:'||c.id AND c.used_by=$1 WHERE l.kind='redeem'
+ UNION ALL
+ SELECT 'topup:'||t.id,'manual',t.status,t.amount,
+ CASE WHEN l.id IS NOT NULL THEN COALESCE(l.balance_after-l.frozen_after-l.previous_available,l.amount) END,
+ CASE WHEN l.id IS NOT NULL THEN COALESCE(l.frozen_after-l.previous_frozen,0) END,
+ l.balance_after,l.frozen_after,t.id,COALESCE(NULLIF(t.note,''),l.description,''),
+ COALESCE(l.created_at,t.created_at),t.id
+ FROM topups t LEFT JOIN credits l ON l.reference='topup:'||t.id AND l.kind='topup' WHERE t.user_id=$1
+) SELECT * FROM history ORDER BY created_at DESC,id DESC LIMIT 300"""
 
 
 @router.get('/v1/wallet')

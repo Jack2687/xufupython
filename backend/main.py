@@ -14,7 +14,7 @@ from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
-from . import customer_api, admin_orders
+from . import customer_api, admin_orders, order_updates
 from .request_origin import configured_origin, origin_allowed
 
 PUBLIC_ORIGIN = configured_origin(os.getenv('PUBLIC_ORIGIN', ''))
@@ -72,10 +72,12 @@ def worker_loop(stop):
 async def lifespan(app):
     db.initialize();seed();stop=threading.Event()
     thread=threading.Thread(target=worker_loop,args=(stop,),daemon=True,name='xufu-scheduler');thread.start()
+    order_updates.updates.start()
     try:
         yield
     finally:
         stop.set()
+        await order_updates.updates.close()
         await asyncio.to_thread(thread.join,115)
         db.close()
 
@@ -117,7 +119,7 @@ async def security(request:Request,call_next):
 
 
 for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)
-for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router):app.include_router(router)
+for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router,order_updates.router):app.include_router(router)
 
 
 @app.get('/health/live')

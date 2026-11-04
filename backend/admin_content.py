@@ -2,7 +2,7 @@ import csv
 import io
 import ipaddress
 from datetime import date,timedelta,timezone,datetime
-from fastapi import APIRouter,Depends,Request
+from fastapi import APIRouter,Depends,Request,Query
 from fastapi.responses import Response
 from . import db
 from .common import *
@@ -51,8 +51,22 @@ def delete_announcement(id:str,request:Request):
 
 
 @router.get('/risk')
-def risk(severity:str=''):
-    return {'items':db.all("SELECT e.*,u.email FROM risk_events e LEFT JOIN users u ON u.id=e.user_id WHERE ($1='' OR e.severity=$1) ORDER BY e.id DESC LIMIT 300",severity),'blocks':db.all('SELECT * FROM blocked_ips WHERE expires_at>now() ORDER BY created_at DESC'),'config':config('risk')}
+def risk(severity:str='',q:str='',category:str='',state:str='',start:str='',end:str='',page:int=Query(1,ge=1,le=100000),page_size:int=Query(50,ge=1,le=100)):
+    require(severity in ('','high','medium','low') and state in ('','pending','resolved') and len(q)<=200 and len(category)<=80,'筛选参数无效')
+    today=datetime.now(timezone(timedelta(hours=8))).date()
+    try:
+        first=date.fromisoformat(start) if start else today-timedelta(days=30)
+        last=date.fromisoformat(end) if end else today
+    except ValueError: raise BusinessError('日期格式不正确')
+    require(0<=(last-first).days<=3660,'日期范围无效')
+    where=" FROM risk_events e LEFT JOIN users u ON u.id=e.user_id WHERE ($1='' OR e.severity=$1) AND ($2='' OR e.ip ILIKE '%'||$2||'%' OR u.email ILIKE '%'||$2||'%' OR u.name ILIKE '%'||$2||'%' OR e.detail ILIKE '%'||$2||'%') AND ($3='' OR e.category=$3) AND ($4='' OR e.resolved=($4='resolved')) AND COALESCE(e.last_seen,e.created_at)>=($5::date AT TIME ZONE 'Asia/Shanghai') AND COALESCE(e.last_seen,e.created_at)<(($6::date+1) AT TIME ZONE 'Asia/Shanghai')"
+    args=(severity,q,category,state,first,last)
+    totals=db.one("SELECT count(*) AS total,count(*) FILTER(WHERE NOT e.resolved) AS pending,count(*) FILTER(WHERE e.severity='high' AND NOT e.resolved) AS high,COALESCE(sum(e.occurrences),0) AS occurrences"+where,*args)
+    rows=db.all('SELECT e.*,u.email,u.name AS user_name,COALESCE(e.last_seen,e.created_at) AS last_seen'+where+' ORDER BY COALESCE(e.last_seen,e.created_at) DESC,e.id DESC LIMIT $7 OFFSET $8',*args,page_size,(page-1)*page_size)
+    blocks=db.all('SELECT * FROM blocked_ips WHERE expires_at>now() ORDER BY created_at DESC')
+    return {'items':rows,'total':totals['total'],'page':page,'page_size':page_size,'summary':dict(totals,blocks=len(blocks)),
+            'blocks':blocks,'config':config('risk'),'categories':[r['category'] for r in db.all('SELECT DISTINCT category FROM risk_events ORDER BY category')],
+            'generated_at':now(),'start':first,'end':last}
 
 
 @router.post('/risk/{id}/resolve')

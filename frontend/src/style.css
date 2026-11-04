@@ -24,3 +24,6 @@
 @media(max-width:760px){.profile-heading{align-items:flex-start;gap:18px;flex-wrap:wrap}.profile-heading h1{font-size:28px}.profile-overview{gap:14px}.profile-identity{padding:23px}.profile-balance strong{font-size:36px}.profile-metric{padding:18px}.profile-metric strong{font-size:26px}.profile-metric p{font-size:10px}.profile-membership{padding:21px}.profile-tier{min-width:0;gap:12px}.profile-tier h2{font-size:17px}.profile-tier-emblem{padding:10px}.profile-records-heading{padding:21px 18px;align-items:flex-start}.profile-records-heading .btn{padding:9px 11px}.profile-records-heading p{max-width:180px}.profile-record-filters{padding:0 18px 16px}.profile-record-filters select{width:100%}.profile-records .table-tools{padding:16px 18px}.profile-record-filters .tabs{width:100%}.profile-record-filters .tabs button{padding:8px 10px;font-size:11px}.profile-records .pagination{padding:16px 18px}}
 
 .badge.order-status{white-space:normal;max-width:280px;line-height:1.5}
+
+.spinning{animation:xufu-spin 1s linear infinite}@keyframes xufu-spin{to{transform:rotate(360deg)}}.live-status{font-size:12px;color:#607f77;display:flex;gap:12px;align-items:center}
+@media(prefers-reduced-motion:reduce){.spinning{animation-duration:2.5s}}

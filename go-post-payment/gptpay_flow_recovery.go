@@ -26,7 +26,7 @@ func (t *gptpay_transaction) confirmActivation() error {
 	if e := t.save(""); e != nil {
 		return e
 	}
-	if cp.ReturnURL != "" {
+	if !t.skipMerchantReturn && cp.ReturnURL != "" {
 		u, e := chatgpt_ValidateReturnURL(cp.ReturnURL, cp)
 		if e == nil {
 			if _, e = t.http.Request("GET", u, protocol_RequestOptions{Headers: t.platform.Headers("")}); e != nil {
@@ -73,16 +73,34 @@ func (t *gptpay_transaction) confirmActivation() error {
 	return nil
 }
 
+// When proactive renewal refresh is disabled, recover expired credentials only
+// after a definitive 401. Keep the latest checkpoint and original retry policy.
+func (t *gptpay_transaction) renewalSubscriptions() (protocol_Map, error) {
+	data, e := t.platform.Subscriptions(true)
+	if t.skipRenewalRefresh && protocol_FlowErrorCode(e) == "http_401" {
+		if e = t.platform.Refresh(); e != nil {
+			return nil, e
+		}
+		if e = t.save(""); e != nil {
+			return nil, e
+		}
+		return t.platform.Subscriptions(true)
+	}
+	return data, e
+}
+
 func (t *gptpay_transaction) disableRenewal() error {
 	cp := t.cp
 	t.progress.emit(model_ProgressStageCancellation, model_ProgressRunning, "")
-	if e := t.platform.Refresh(); e != nil {
-		return e
+	if !t.skipRenewalRefresh {
+		if e := t.platform.Refresh(); e != nil {
+			return e
+		}
 	}
 	if e := t.save("cancellation"); e != nil {
 		return e
 	}
-	data, e := t.platform.Subscriptions(true)
+	data, e := t.renewalSubscriptions()
 	if e != nil {
 		return e
 	}
@@ -102,7 +120,16 @@ func (t *gptpay_transaction) disableRenewal() error {
 			break
 		}
 		original := e
-		data, e = t.platform.Subscriptions(true)
+		unauthorized := t.skipRenewalRefresh && protocol_FlowErrorCode(original) == "http_401"
+		if unauthorized {
+			if e = t.platform.Refresh(); e != nil {
+				return e
+			}
+			if e = t.save(""); e != nil {
+				return e
+			}
+		}
+		data, e = t.renewalSubscriptions()
 		if e != nil {
 			return e
 		}
@@ -110,7 +137,7 @@ func (t *gptpay_transaction) disableRenewal() error {
 		if cp.Renewal == "off" {
 			return t.save("completed")
 		}
-		if i > 0 || cp.Renewal != "on" || !protocol_StringSet("network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504")[protocol_FlowErrorCode(original)] {
+		if i > 0 || cp.Renewal != "on" || (!unauthorized && !protocol_StringSet("network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504")[protocol_FlowErrorCode(original)]) {
 			return original
 		}
 	}
@@ -120,7 +147,7 @@ func (t *gptpay_transaction) disableRenewal() error {
 				return e
 			}
 		}
-		data, e = t.platform.Subscriptions(true)
+		data, e = t.renewalSubscriptions()
 		if e != nil {
 			return e
 		}

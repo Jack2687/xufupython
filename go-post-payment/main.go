@@ -80,8 +80,10 @@ type input struct {
 	Proxy          string    `json:"proxy"`
 	ProxyExpiresAt time.Time `json:"proxy_expires_at"`
 	// 付款后 session 刷新的可配置重试次数与间隔（秒）；0 表示用默认。
-	RefreshRetries  int     `json:"refresh_retries"`
-	RefreshInterval float64 `json:"refresh_interval_seconds"`
+	RefreshRetries     int     `json:"refresh_retries"`
+	RefreshInterval    float64 `json:"refresh_interval_seconds"`
+	SkipMerchantReturn bool    `json:"skip_merchant_return"`
+	SkipRenewalRefresh bool    `json:"skip_renewal_refresh"`
 }
 type wire struct {
 	in  *bufio.Scanner
@@ -121,11 +123,13 @@ func (p *progress) emit(stage, status, code string) {
 }
 
 type gptpay_transaction struct {
-	cp       *model_Checkpoint
-	http     protocol_HTTPTransport
-	platform *chatgpt_Platform
-	progress *progress
-	saveFn   func(*model_Checkpoint, string) error
+	skipMerchantReturn bool
+	skipRenewalRefresh bool
+	cp                 *model_Checkpoint
+	http               protocol_HTTPTransport
+	platform           *chatgpt_Platform
+	progress           *progress
+	saveFn             func(*model_Checkpoint, string) error
 }
 
 func (t *gptpay_transaction) save(phase string) error {
@@ -333,6 +337,8 @@ func run(in input, w *wire) error {
 		platform.RefreshInterval = in.RefreshInterval
 	}
 	tx := &gptpay_transaction{cp: cp, http: transport, platform: platform, progress: &progress{observer: observer}, saveFn: w.checkpoint}
+	tx.skipMerchantReturn = in.SkipMerchantReturn
+	tx.skipRenewalRefresh = in.SkipRenewalRefresh
 	if in.Operation == "refresh" {
 		err = platform.Refresh()
 	} else {

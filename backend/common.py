@@ -100,7 +100,12 @@ def audit(q, request, action, target, detail):
 
 
 def event(request, category, severity, detail):
-    db.execute("INSERT INTO risk_events(user_id,category,severity,ip,detail) SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS(SELECT 1 FROM risk_events WHERE category=$2 AND ip=$4 AND created_at>now()-interval '1 minute')", getattr(request.state, 'user', {}).get('id'), category, severity, ip(request), detail)
+    owner = getattr(request.state, 'user', {}).get('id')
+    with db.transaction() as q:
+        q.execute('SELECT pg_advisory_xact_lock(1886020,hashtext($1))',category+ip(request)+(owner or ''))
+        row=q.one("SELECT id FROM risk_events WHERE category=$1 AND ip=$2 AND user_id IS NOT DISTINCT FROM $3 AND NOT resolved AND created_at>now()-interval '1 minute' ORDER BY id DESC LIMIT 1 FOR UPDATE",category,ip(request),owner)
+        if row: q.execute('UPDATE risk_events SET occurrences=occurrences+1,last_seen=now() WHERE id=$1',row['id'])
+        else: q.execute('INSERT INTO risk_events(user_id,category,severity,ip,detail,last_seen) VALUES($1,$2,$3,$4,$5,now())',owner,category,severity,ip(request),detail)
 
 
 def limit(key, count):

@@ -57,6 +57,8 @@ ALTER TABLE resources ADD COLUMN IF NOT EXISTS ip_mode text NOT NULL DEFAULT 'dy
 CREATE TABLE IF NOT EXISTS risk_events (id bigserial PRIMARY KEY,user_id text REFERENCES users(id),category text NOT NULL,severity text NOT NULL,ip text NOT NULL,detail text NOT NULL,resolved boolean NOT NULL DEFAULT false,created_at timestamptz DEFAULT now());
 
 CREATE INDEX IF NOT EXISTS risk_time ON risk_events(created_at DESC);
+ALTER TABLE risk_events ADD COLUMN IF NOT EXISTS occurrences int NOT NULL DEFAULT 1;
+ALTER TABLE risk_events ADD COLUMN IF NOT EXISTS last_seen timestamptz;
 
 CREATE TABLE IF NOT EXISTS audit_events (id bigserial PRIMARY KEY,actor_id text REFERENCES users(id),action text NOT NULL,target text NOT NULL,detail text NOT NULL,ip text NOT NULL,created_at timestamptz DEFAULT now());
 
@@ -198,3 +200,28 @@ CREATE TABLE IF NOT EXISTS subscription_followups (
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Delivered only after commit; no polling and no customer/credential data.
+CREATE OR REPLACE FUNCTION notify_order_update() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE oid text; owner_id text;
+BEGIN
+ IF TG_TABLE_NAME='orders' THEN
+  oid=NEW.id; owner_id=NEW.user_id;
+ ELSE
+  oid=NEW.order_id;
+  SELECT user_id INTO owner_id FROM orders WHERE id=oid;
+ END IF;
+ IF owner_id IS NOT NULL THEN
+  PERFORM pg_notify('xufu_order_updates',json_build_object('id',oid,'user_id',owner_id)::text);
+ END IF;
+ RETURN NEW;
+END $$;
+DO $$
+DECLARE table_name text;
+BEGIN
+ FOREACH table_name IN ARRAY ARRAY['orders','order_events','payment_trace_events','subscription_runs','subscription_followups'] LOOP
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='order_update_notify' AND tgrelid=table_name::regclass) THEN
+   EXECUTE format('CREATE TRIGGER order_update_notify AFTER INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION notify_order_update()',table_name);
+  END IF;
+ END LOOP;
+END $$;

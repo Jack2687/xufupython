@@ -2,7 +2,7 @@ import type {Row} from './lib'
 
 type State='completed'|'running'|'waiting'|'review'|'failed'|'skipped'
 type Fact={label:string;value:string}
-export type JourneyStage={id:string;title:string;state:State;result:string;facts:Fact[];events:Row[];duration:string;next:string}
+export type JourneyStage={id:string;title:string;state:State;result:string;facts:Fact[];events:Row[];duration:string;next:string;startedAt:string}
 type Input={order?:Row;payment?:Row;checkout?:Row;billing?:Row;events?:Row[];links?:Row[]}
 const validAmount=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0
 export function currencyAmount(amount:unknown,currency:unknown){
@@ -34,7 +34,7 @@ export function buildPaymentJourney(input:Input){
  const finish=events.filter(e=>e.phase==='complete').at(-1)
  const rounds=Math.max(0,...events.map(e=>Number(e.round)||0),...links.map(e=>Number(e.round)||0))
  const stopped=['failed','cancelled'].includes(o.status),subscription=o.workflow==='subscription'
- const stages:JourneyStage[]=[['checkout','生成结账链接'],['billing','账单与税费'],['payment','订阅付款'],['activation','核实订阅'],['renewal','自动续费设置'],['complete','办理结果']].map(([id,title])=>({id,title,state:'waiting',result:'尚未开始',facts:[],events:[],duration:'未记录',next:''}))
+ const stages:JourneyStage[]=[['checkout','生成结账链接'],['billing','账单与税费'],['payment','订阅付款'],['activation','核实订阅'],['renewal','自动续费设置'],['complete','办理结果']].map(([id,title])=>({id,title,state:'waiting',result:'尚未开始',facts:[],events:[],duration:'未记录',next:'',startedAt:''}))
  const stage=(id:string)=>stages.find(s=>s.id===id)!
  let context='checkout'
  for(const e of events){
@@ -50,6 +50,8 @@ export function buildPaymentJourney(input:Input){
  }
  for(const s of stages){
   s.duration=elapsed(s.events)
+  const starts=s.events.map(e=>{const t=time(e.created_at);return t===null?null:t-Math.max(0,Number(e.elapsed_ms)||0)}).filter((t):t is number=>t!==null)
+  s.startedAt=starts.length?new Date(Math.min(...starts)).toISOString():''
   const latest=s.events.filter(e=>!e.round||Number(e.round)===rounds).at(-1)
   if(latest){s.state=latest.state==='failed'?'failed':['review','running','waiting'].includes(latest.state)?latest.state:'waiting';s.result=s.state==='failed'?'阶段未完成':s.state==='review'?'需要核实':s.state==='running'?'处理中':'等待结果确认'}
  }
@@ -61,7 +63,7 @@ export function buildPaymentJourney(input:Input){
  const checkoutDone=currentLinks.length>0||c.ready===true
  if(checkoutDone)set('checkout',['completed','结账链接已生成'])
  else if(o.status==='queued')set('checkout',['waiting','等待办理资源'])
- fact('checkout','提链流程',o.checkout_flow==='legacy'?'旧提链':'未记录')
+ fact('checkout','提链流程',flowNames[o.subscription_flow]||'未记录')
  fact('checkout','本单链接类型',linkType)
  fact('checkout','执行轮次',rounds?`${rounds} 轮`:'未记录')
  const quoted=currencyAmount(p.amount,p.currency),received=currencyAmount(p.charged_amount,p.charged_currency)
@@ -99,18 +101,19 @@ export function buildPaymentJourney(input:Input){
  const activeStages=stages.filter(s=>subscription||['checkout','complete'].includes(s.id)||p.state&&['billing','payment'].includes(s.id))
  const problems=activeStages.filter(s=>['failed','review'].includes(s.state)&&s.id!=='complete')
  const followupDone=o.activation==='active'&&['disabled','kept'].includes(o.renewal)
- if(o.status==='succeeded')set('complete',problems.length?['review','付款完成，后续仍需处理']:subscription&&!followupDone?['running','付款成功，正在处理后续核实']:['completed',subscription?'订阅办理完成':'办理完成'])
+ if(o.status==='succeeded')set('complete',problems.length?['review','付款完成，后续仍需处理']:subscription&&!followupDone?['waiting','付款成功，正在处理后续核实']:['completed',subscription?'订阅办理完成':'办理完成'])
  else if(stopped)set('complete',[o.status==='failed'?'failed':'skipped',o.status==='failed'?'本次办理未完成':'本次办理已停止'])
  else if(o.status==='review'||problems.length)set('complete',['review','有待核实事项'])
  else if(o.workflow==='link'&&checkoutDone)set('complete',['completed','结账链接已生成'])
- else set('complete',['running','办理中'])
+ else set('complete',['waiting','等待办理完成'])
  const feeState:Record<string,string>={held:'已冻结',released:'已解冻',charged:'已结算'}
- const fee=validAmount(o.fee)?(o.fee/100).toFixed(2)+' R':'未记录'
+ const fee=validAmount(o.fee)?(o.fee/100).toFixed(2)+' 积分':'未记录'
  fact('complete','服务费',`${fee} · ${feeState[p.fee_state]||'未记录结算状态'}`)
  const start=time(o.created_at),end=time(finish?.created_at)
  const total=start!==null&&end!==null&&end>=start?durationText(end-start):'未记录完整起止时间'
  fact('complete','全程耗时',total)
  for(const s of activeStages){
+  if((o.status==='review'||followupDone)&&s.state==='running'){s.state='waiting';s.result='阶段已结束，结果未单独记录'}
   if(stopped&&['waiting','running'].includes(s.state)){s.state='skipped';s.result=s.events.length?'流程已停止，结果未确认':'未执行'}
   if(['failed','review'].includes(s.state)){
    const last=[...s.events].reverse().find(e=>['failed','review'].includes(e.state)&&e.description&&e.code!=='subscription_absent')

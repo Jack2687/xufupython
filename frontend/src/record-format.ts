@@ -12,11 +12,11 @@ export function upstreamAmount(p:Row={}){
  const amount=actual?p.charged_amount:p.amount,currency=String(actual?p.charged_currency:p.currency||'').toUpperCase()
  if(amount==null||!currency)return {value:'—',label:'金额尚未记录',actual:false}
  const digits=currency==='JPY'?0:2
- return {value:`${(Number(amount)/(digits?100:1)).toLocaleString('zh-CN',{minimumFractionDigits:digits,maximumFractionDigits:digits})} ${currency}`,label:actual?'已核实实收':'含税报价',actual}
+ return {value:`${(Number(amount)/(digits?100:1)).toLocaleString('zh-CN',{minimumFractionDigits:digits,maximumFractionDigits:digits})} ${currency}`,label:actual?'订单已确认扣款':'含税报价',actual}
 }
 export function discountText(o:Row){
  const s=o.price_snapshot||{}
  if(s.standard==null)return '历史订单未记录优惠'
  const saving=Math.max(0,Number(s.standard)-Number(o.fee))
- return saving>0?`已减 ${cash(saving)} R${s.source==='override'?' · 专属定价':s.tier_name?` · ${s.tier_name}`:''}`:'标准服务费'
+ return saving>0?`已减 ${cash(saving)} 积分${['override','product_override'].includes(s.source)?' · 专属定价':s.tier_name?` · ${s.tier_name}`:''}`:'标准服务费'
 }

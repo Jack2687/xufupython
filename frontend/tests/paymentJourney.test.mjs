@@ -8,7 +8,7 @@ const stage=(j,id)=>j.stages.find(s=>s.id===id)
 test('paid but pending follow-up cannot display subscription completed',()=>{
  const data=base();data.order.activation='pending';data.order.renewal='pending'
  const j=buildPaymentJourney(data)
- assert.equal(stage(j,'payment').state,'completed');assert.equal(j.state,'running')
+ assert.equal(stage(j,'payment').state,'completed');assert.equal(j.state,'waiting')
  data.order.renewal='review';data.events=[event('complete','review')]
  const pending=buildPaymentJourney(data)
  assert.equal(stage(pending,'activation').state,'review');assert.equal(pending.state,'review')

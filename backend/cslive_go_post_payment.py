@@ -312,6 +312,8 @@ def execute(cp, save, *, operation='finish'):
         payload = {'operation': operation, 'state': cp, 'proxy': endpoint,
                    'proxy_expires_at': cp['proxy_expires_at'],
                    'refresh_retries': int(cp.get('refresh_retries') or 0),
+                   'skip_merchant_return': cp.get('visit_merchant_return', True) is False,
+                   'skip_renewal_refresh': cp.get('refresh_before_renewal', True) is False,
                    'refresh_interval_seconds': float(cp.get('refresh_interval_seconds') or 0)}
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         process = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -427,6 +429,8 @@ def _run(order_id, *, plan=None, responses=(), proxy_url=None, request_context=N
             _save(order_id, cp)
         cp['executor'] = executor
         pcfg = config('payment')
+        cp['visit_merchant_return'] = pcfg.get('cslive_go_visit_return', True)
+        cp['refresh_before_renewal'] = pcfg.get('cslive_go_refresh_before_renewal', True)
         cp['refresh_retries'] = pcfg.get('post_refresh_retries', 4)
         cp['refresh_interval_seconds'] = pcfg.get('post_refresh_interval_seconds', 3)
         with trace.scope(order_id, row['trace_round']):
