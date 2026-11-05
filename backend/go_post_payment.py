@@ -149,13 +149,12 @@ def _event(message):
     if not phase:
         return
     event = message.get('event')
-    diagnostics = {k: v for k, v in fields.items() if k.startswith('response_') or k in
-                   ('cf_ray', 'retry_wait_ms', 'retry_wait_elapsed_ms', 'challenge_required',
-                    'connection_ready_ms', 'request_write_ms', 'first_byte_ms',
-                    'network_stage', 'network_stage_elapsed_ms')}
+    # Shared strict allowlist also handles numeric/boolean network evidence.
+    diagnostics = dict(fields)
     for key in ('retry_wait_ms', 'retry_wait_elapsed_ms'):
         if type(diagnostics.get(key)) in (int, float):
             diagnostics[key] = round(diagnostics[key])
+    diagnostics = trace._diagnostics(diagnostics)
     diagnostics['request_kind'] = kind
     if type(fields.get('attempt')) is int:
         diagnostics['request_attempt'] = fields['attempt']

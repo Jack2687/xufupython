@@ -6,7 +6,6 @@ import (
 	fmt "fmt"
 	fhttp "github.com/bogdanfinn/fhttp"
 	fhttpcookiejar "github.com/bogdanfinn/fhttp/cookiejar"
-	fhttptrace "github.com/bogdanfinn/fhttp/httptrace"
 	tls_client "github.com/bogdanfinn/tls-client"
 	profiles "github.com/bogdanfinn/tls-client/profiles"
 	publicsuffix "golang.org/x/net/publicsuffix"
@@ -49,6 +48,7 @@ type transport_Transport struct {
 	observer      *observability_Observer
 	service       string
 	proxySecrets  []string
+	proxyProtocol string
 	prepared      *transport_preparedConnection
 	preparedURL   string
 }
@@ -63,7 +63,7 @@ func transport_NewTransport(ctx context.Context, proxyURL string, timeout float6
 		cancel()
 		return nil, &protocol_ProtocolError{Code: "network_error"}
 	}
-	t := &transport_Transport{ctx: ctx, cancel: cancel, timeout: time.Duration(timeout * float64(time.Second)), expires: expires, jar: j}
+	t := &transport_Transport{ctx: ctx, cancel: cancel, timeout: time.Duration(timeout * float64(time.Second)), expires: expires, jar: j, proxyProtocol: "direct"}
 	t.options = []tls_client.HttpClientOption{
 		tls_client.WithClientProfile(profiles.Chrome_131), tls_client.WithRandomTLSExtensionOrder(),
 		tls_client.WithDisableHttp3(), tls_client.WithNotFollowRedirects(),
@@ -76,6 +76,8 @@ func transport_NewTransport(ctx context.Context, proxyURL string, timeout float6
 			return nil, &protocol_ProtocolError{Code: "network_error"}
 		}
 		t.options = append(t.options, transport_transportProxyOption(proxyURL))
+		parsed, _ := url.Parse(proxyURL)
+		t.proxyProtocol = parsed.Scheme
 		if proxy, err := url.Parse(proxyURL); err == nil && proxy.User != nil {
 			password, _ := proxy.User.Password()
 			t.proxySecrets = []string{proxy.User.Username(), password}
@@ -155,12 +157,16 @@ func (t *transport_Transport) Request(method, rawURL string, opts protocol_Reque
 		}
 		started := time.Now()
 		timing := &transport_requestTiming{started: started}
-		ctx = fhttptrace.WithClientTrace(ctx, timing.trace())
+		ctx = timing.context(ctx)
 		response, requestErr := t.requestOnce(ctx, method, rawURL, opts)
+		// Capture cancellation state before our own cleanup cancels the context.
+		network := transport_networkDiagnostics(requestErr, ctx.Err(), t.ctx.Err())
+		network["request_timeout_ms"] = float64(budget) / float64(time.Millisecond)
+		network["proxy_protocol"] = t.proxyProtocol
 		cancel()
 		finished := time.Now()
 		retrying := attempt < attempts && (requestErr != nil || transport_retryHTTPStatus(response.StatusCode))
-		t.observe(method, rawURL, attempt, started, finished, response, requestErr, retrying, opts, sentCookies, timing.fields(finished))
+		t.observe(method, rawURL, attempt, started, finished, response, requestErr, retrying, opts, sentCookies, timing.fields(finished), network)
 		if !retrying {
 			if requestErr != nil {
 				return nil, &protocol_ProtocolError{Code: "network_error"}
@@ -233,6 +239,9 @@ func (t *transport_Transport) requestOnce(ctx context.Context, method, rawURL st
 		defer client.CloseIdleConnections()
 	}
 	resp, err := client.Do(req)
+	if resp != nil {
+		transport_timing(ctx).receivedHeaders(resp.StatusCode)
+	}
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -244,6 +253,7 @@ func (t *transport_Transport) requestOnce(ctx context.Context, method, rawURL st
 		t.jar.SetCookies(u, resp.Cookies())
 	}
 	content, err := io.ReadAll(resp.Body)
+	transport_timing(ctx).set("response_bytes_received", len(content))
 	if err == nil {
 		content, err = transport_decodeTransportBody(content, resp.Header.Get("Content-Encoding"))
 	}

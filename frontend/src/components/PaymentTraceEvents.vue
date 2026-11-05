@@ -28,7 +28,9 @@ Object.assign(diagnosticLabels,{response_content_type:'响应内容类型',respo
 Object.assign(diagnosticLabels,{retry_number:'本单重试次数',retry_limit:'最大重试次数',retry_delay_seconds:'重试间隔（秒）',checkout_reused:'复用原结账链接'})
 Object.assign(diagnosticLabels,{checkout_exit_code:'提链进程退出码'})
 Object.assign(diagnosticValues,{go_checkout:'Go 提链程序'})
-const diagnosticText=(key:string,value:unknown)=>key==='response_error_code'?String(value):typeof value==='boolean'?(value?'是':'否'):key.endsWith('_ms')?`${value} 毫秒`:diagnosticValues[String(value)]||String(value)
+Object.assign(diagnosticLabels,{proxy_protocol:'本次代理协议',proxy_connect_ms:'连接代理耗时',proxy_tls_ms:'代理 TLS 握手耗时',proxy_tunnel_ms:'代理隧道协商耗时',proxy_connect_status:'代理 CONNECT 状态码',proxy_tunnel_established:'代理隧道已建立',connection_reused:'复用已有连接',connection_idle_ms:'连接复用前空闲时间',request_written:'请求已写出（不代表上游已处理）',response_started:'已收到响应字节',response_headers_received:'已完整收到响应头',response_status:'已收到的 HTTP 状态码',response_bytes_received:'已接收响应内容（字节）',request_timeout_ms:'本次请求超时预算',remaining_deadline_ms:'流程剩余时间',network_error_class:'网络错误分类',network_error_op:'失败的网络操作',timeout_source:'超时或中断来源'})
+Object.assign(diagnosticValues,{tcp_connect:'建立 TCP 连接',tls_handshake:'目标 TLS 握手',proxy_tls:'代理 TLS 握手',proxy_tunnel:'代理隧道协商',dns_timeout:'域名解析超时',dns_failure:'域名解析失败',tls_certificate:'TLS 证书校验失败',canceled:'请求已取消',connection_reset:'连接被重置',connection_refused:'连接被拒绝',broken_pipe:'连接写入中断',network_unreachable:'网络或目标不可达',unexpected_eof:'响应提前中断',eof:'连接提前关闭',proxy_handshake:'代理隧道协商失败',network_other:'其他网络错误（未输出原文）',dial:'建立连接',read:'读取数据',write:'写入数据',flow_deadline:'付款后流程总时限耗尽',flow_canceled:'付款后流程已中断',request_deadline:'本次请求时限耗尽',transport_timeout:'底层网络超时',direct:'直连'})
+const diagnosticText=(key:string,value:unknown)=>key==='network_stage'&&value==='dns'?'域名解析':key==='network_stage'&&value==='proxy_connect'?'连接代理':key==='response_error_code'?String(value):typeof value==='boolean'?(value?'是':'否'):key.endsWith('_ms')?`${value} 毫秒`:diagnosticValues[String(value)]||String(value)
 const duration=(v:unknown)=>Number(v)>=1000?`${(Number(v)/1000).toFixed(1)} 秒`:`${Number(v)||0} 毫秒`
 </script>
 <template>

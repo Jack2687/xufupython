@@ -11,6 +11,7 @@ WORKDIR /build/postpayment
 COPY go-post-payment/go.mod go-post-payment/go.sum ./
 RUN go mod download
 COPY go-post-payment/ ./
+RUN go test -race -timeout 60s ./...
 RUN CGO_ENABLED=0 go build -trimpath -o /post-payment .
 
 FROM golang:1.25-bookworm AS cslive

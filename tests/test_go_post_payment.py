@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from backend import go_post_payment as gp
+from backend import cslive_go_post_payment as cgp
 from backend.post_payment import FollowupError
 
 
@@ -35,6 +36,36 @@ def go_checkpoint(cp):
 
 
 class GoAdapterTests(unittest.TestCase):
+    def test_network_evidence_survives_both_adapters_without_sensitive_values(self):
+        fields = {'request_kind': 'renewal_read', 'attempt': 3, 'error_code': 'network_timeout',
+                  'duration_ms': 45000, 'network_stage': 'response_headers',
+                  'network_error_class': 'timeout', 'timeout_source': 'request_deadline',
+                  'request_timeout_ms': 45000, 'remaining_deadline_ms': 30000,
+                  'proxy_protocol': 'https', 'proxy_connect_status': 200, 'proxy_tunnel_established': True,
+                  'proxy_connect_ms': 12.5, 'proxy_tls_ms': 20, 'proxy_tunnel_ms': 100,
+                  'connection_reused': True, 'request_written': True,
+                  'response_started': False, 'response_headers_received': False,
+                  'access_token': 'secret', 'proxy_url': 'http://user:secret@private-host',
+                  'error': 'secret', 'network_error_op': 'read'}
+        for adapter in (gp, cgp):
+            with self.subTest(adapter=adapter.__name__), patch.object(adapter.trace, 'record') as record:
+                adapter._event({'event': 'http_request', 'fields': fields})
+                args, kwargs = record.call_args
+                self.assertEqual(args, ('renewal', 'failed', 'network_timeout'))
+                evidence = adapter.trace._diagnostics(kwargs['diagnostics'])
+                self.assertEqual(evidence['request_attempt'], 3)
+                self.assertEqual(evidence['proxy_connect_status'], 200)
+                self.assertEqual(evidence['network_error_class'], 'timeout')
+                self.assertEqual(evidence['request_timeout_ms'], 45000)
+                self.assertTrue(evidence['request_written'])
+                self.assertFalse(evidence['response_headers_received'])
+                self.assertFalse(evidence['retrying'])
+                self.assertNotIn('secret', json.dumps(evidence))
+        self.assertEqual(gp.trace._diagnostics({'network_error_class': 'token-secret',
+            'network_error_op': 'secret', 'timeout_source': 'secret', 'proxy_protocol': 'secret',
+            'proxy_connect_status': 999, 'response_bytes_received': -1,
+            'request_written': 'true', 'request_timeout_ms': float('inf'), 'dns_ms': float('nan')}), {})
+
     def test_local_proxy_bridge_preserves_vendor_route_and_credentials(self):
         for scheme in ('http', 'https'):
             with self.subTest(scheme=scheme):

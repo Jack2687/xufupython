@@ -72,7 +72,10 @@ func (d *transport_transportProxyDialer) DialContext(ctx context.Context, networ
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
+	timing := transport_timing(ctx)
+	started := timing.begin("proxy_connect")
 	c, err := d.dialer.DialContext(ctx, "tcp", d.url.Host)
+	timing.end("proxy_connect_ms", started, err)
 	if err != nil {
 		return nil, err
 	}
@@ -101,19 +104,27 @@ func (d *transport_transportProxyDialer) DialContext(ctx context.Context, networ
 				conf.NextProtos = []string{"http/1.1"}
 			}
 			t := tls.Client(c, conf)
-			if err := t.HandshakeContext(ctx); err != nil {
+			started = timing.begin("proxy_tls")
+			err = t.HandshakeContext(ctx)
+			timing.end("proxy_tls_ms", started, err)
+			if err != nil {
 				return nil, err
 			}
 			tunnel = t
 		}
-		tunnel, err = d.connect(tunnel, address)
+		started = timing.begin("proxy_tunnel")
+		tunnel, err = d.connect(tunnel, address, timing)
 	case "socks4", "socks4a":
+		started = timing.begin("proxy_tunnel")
 		err = d.socks4(ctx, c, address)
 	case "socks5", "socks5h":
+		started = timing.begin("proxy_tunnel")
 		err = d.socks5(ctx, c, address)
 	default:
 		err = transport_errProxy
 	}
+	timing.end("proxy_tunnel_ms", started, err)
+	timing.set("proxy_tunnel_established", err == nil)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +138,7 @@ func (d *transport_transportProxyDialer) DialContext(ctx context.Context, networ
 	return tunnel, nil
 }
 
-func (d *transport_transportProxyDialer) connect(c net.Conn, address string) (net.Conn, error) {
+func (d *transport_transportProxyDialer) connect(c net.Conn, address string, timing *transport_requestTiming) (net.Conn, error) {
 	r := &http.Request{Method: "CONNECT", URL: &url.URL{Host: address}, Host: address, Header: make(http.Header)}
 	if d.url.User != nil {
 		password, _ := d.url.User.Password()
@@ -142,6 +153,7 @@ func (d *transport_transportProxyDialer) connect(c net.Conn, address string) (ne
 	if err != nil {
 		return nil, err
 	}
+	timing.set("proxy_connect_status", resp.StatusCode)
 	if resp.StatusCode != 200 {
 		return nil, transport_errProxy
 	}

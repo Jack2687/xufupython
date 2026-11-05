@@ -86,7 +86,14 @@ _DIAGNOSTIC_ENUMS = {
     'network_reason': {'timeout', 'proxy_connect', 'dns', 'tls', 'connection'},
     'response_kind': {'json', 'html', 'empty', 'other'},
     'email_source': {'system_billing', 'subscription_account'},
-    'network_stage': {'connection', 'request_write', 'response_headers', 'response_body'},
+    'network_stage': {'connection', 'request_write', 'response_headers', 'response_body',
+                      'dns', 'tcp_connect', 'tls_handshake', 'proxy_connect', 'proxy_tls', 'proxy_tunnel'},
+    'proxy_protocol': {'direct', 'http', 'https', 'socks4', 'socks4a', 'socks5', 'socks5h'},
+    'network_error_class': {'dns_timeout', 'dns_failure', 'tls_certificate', 'timeout', 'canceled',
+                            'connection_reset', 'connection_refused', 'broken_pipe', 'network_unreachable',
+                            'unexpected_eof', 'eof', 'proxy_handshake', 'network_other'},
+    'network_error_op': {'dial', 'read', 'write'},
+    'timeout_source': {'flow_deadline', 'flow_canceled', 'request_deadline', 'transport_timeout'},
 }
 _dropped = 0
 
@@ -139,14 +146,21 @@ def _diagnostics(values):
             result[key] = value
         elif key == 'retry_delay_seconds' and type(value) is int and 5 <= value <= 3600:
             result[key] = value
-        elif key == 'checkout_reused' and type(value) is bool:
+        elif key in {'checkout_reused', 'connection_reused', 'request_written', 'response_started',
+                     'response_headers_received', 'proxy_tunnel_established'} and type(value) is bool:
+            result[key] = value
+        elif key in {'proxy_connect_status', 'response_status'} and type(value) is int and 100 <= value <= 599:
+            result[key] = value
+        elif key == 'response_bytes_received' and type(value) is int and 0 <= value <= 2147483647:
             result[key] = value
         elif key == 'post_payment_delay_seconds' and type(value) is int and 0 <= value <= 300:
             result[key] = value
         elif key == 'post_payment_wait_ms' and type(value) is int and 0 <= value <= 300000:
             result[key] = value
         elif key in {'connection_ready_ms', 'request_write_ms', 'first_byte_ms',
-                     'response_wait_ms', 'network_stage_elapsed_ms'} and type(value) in (int, float) and 0 <= value <= 240000:
+                     'response_wait_ms', 'network_stage_elapsed_ms', 'dns_ms', 'connect_ms', 'tls_ms',
+                     'proxy_connect_ms', 'proxy_tls_ms', 'proxy_tunnel_ms', 'connection_idle_ms',
+                     'request_timeout_ms', 'remaining_deadline_ms'} and type(value) in (int, float) and 0 <= value <= 240000:
             result[key] = round(value, 2)
         else:
             safe = http_evidence.filter_field(key, value)
