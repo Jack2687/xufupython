@@ -1,5 +1,7 @@
 from fastapi import APIRouter,Depends,Request
 from psycopg2.errors import UniqueViolation
+from starlette.concurrency import run_in_threadpool
+from . import redeem_codes
 from . import db
 from .common import *
 from .wallet import credit
@@ -192,37 +194,15 @@ async def review_topup(id: str,request: Request):
 
 
 @router.get('/codes')
-def codes():
-    return {'items':db.all('SELECT c.id,c.prefix,c.amount,c.batch,c.status,c.used_at,c.expires_at,c.created_at,u.email AS used_by FROM redeem_codes c LEFT JOIN users u ON c.used_by=u.id ORDER BY c.created_at DESC LIMIT 1000')}
+def codes(page: int=1,page_size: int=100,q: str='',status: str=''):
+    return redeem_codes.listing(page,page_size,q,status)
 
 
 @router.post('/codes')
 async def create_codes(request: Request):
-    v=await body(request);count=integer(v.get('count'),1,200);amount=integer(v.get('amount'),100,10000000);days=integer(v.get('days'),1,3660)
-    batch=now().astimezone().strftime('%Y%m%d')+'-'+uid()[:6];codes=[]
-    with db.transaction() as q:
-        for _ in range(count):
-            code='XP-'+uid()[:24].upper();codes.append(code)
-            q.execute("INSERT INTO redeem_codes(id,code_hash,code_enc,prefix,amount,batch,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+($7*interval '1 day'))",uid(),digest(code),encrypt(code),code[:7]+'…'+code[-4:],amount,batch,days)
-        audit(q,request,'codes.created',batch,f'生成 {count} 个兑换码')
-    return {'codes':codes,'batch':batch}
+    return await run_in_threadpool(redeem_codes.create,request,await body(request))
 
 
 @router.post('/codes/batch')
 async def batch_codes(request: Request):
-    v=await body(request);ids=v.get('ids',[]);action=v.get('action')
-    require(isinstance(ids,list) and 1<=len(ids)<=1000 and all(isinstance(x,str) for x in ids),'请选择兑换码')
-    with db.transaction() as q:
-        result={'ok':True}
-        if action=='export':
-            result={'codes':[decrypt(x['code_enc']) for x in q.all("SELECT code_enc FROM redeem_codes WHERE id=ANY($1) AND status='active' AND expires_at>now() ORDER BY created_at,id",ids)]}
-        elif action=='copy':
-            ids=list(dict.fromkeys(ids))
-            result={'codes':[decrypt(x['code_enc']) for x in q.all("SELECT code_enc FROM redeem_codes WHERE id=ANY($1) ORDER BY array_position($1::text[],id)",ids)]}
-        elif action=='disable':
-            result={'updated':q.execute("UPDATE redeem_codes SET status='disabled' WHERE id=ANY($1) AND status='active'",ids)}
-        elif action=='delete':
-            result={'deleted':q.execute("DELETE FROM redeem_codes WHERE id=ANY($1) AND status<>'used'",ids)}
-        else:raise BusinessError('不支持的批量操作')
-        audit(q,request,'codes.'+action,'batch',f'处理 {len(ids)} 个兑换码')
-    return result
+    return await run_in_threadpool(redeem_codes.batch,request,await body(request))

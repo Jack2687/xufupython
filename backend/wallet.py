@@ -1,5 +1,6 @@
 import secrets
 from fastapi import APIRouter,Depends,Request
+from starlette.concurrency import run_in_threadpool
 from . import db
 from .common import *
 from . import customer_contract
@@ -26,9 +27,11 @@ LEDGER_QUERY="""WITH history AS (
  LEFT JOIN subscription_runs s ON s.order_id=o.id ORDER BY l.id DESC"""
 
 
-def credit(q,request,user_id,kind,reference,description,amount):
-    user=q.one('SELECT balance,frozen FROM users WHERE id=$1 FOR UPDATE',user_id)
+def credit(q,request,user_id,kind,reference,description,amount,require_active=False):
+    user=q.one('SELECT balance,frozen,status,deleted_at FROM users WHERE id=$1 FOR UPDATE',user_id)
     require(user is not None,'用户不存在',404)
+    if require_active:
+        require(user['status']=='active' and user['deleted_at'] is None,'账户已停用或删除，无法兑换',403)
     integer(amount,-100000000000,100000000000,'金额超出允许范围')
     require(amount!=0,'金额超出允许范围')
     require(user['balance']+amount>=0,'可用余额不足，无法扣减')
@@ -110,15 +113,8 @@ def cancel_topup(id: str,request: Request):
 @router.post('/wallet/redeem')
 @router.post('/v1/wallet/redeem')
 async def redeem(request: Request):
-    v=await body(request);u=current(request)
-    require(limit('redeem:'+u['id'],10),'兑换过于频繁',429)
-    code=str(v.get('code','')).strip().upper()
-    with db.transaction() as q:
-        row=q.one('SELECT id,amount,status,expires_at>now() AS valid FROM redeem_codes WHERE code_hash=$1 FOR UPDATE',digest(code))
-        require(row is not None and row['status']=='active' and row['valid'],'兑换码无效、已过期或已使用')
-        credit(q,request,u['id'],'redeem','redeem:'+row['id'],'兑换码入账',row['amount'])
-        q.execute("UPDATE redeem_codes SET status='used',used_by=$2,used_at=now() WHERE id=$1",row['id'],u['id'])
-    return {'ok':True,'amount':row['amount']}
+    from .redeem_codes import redeem as redeem_transaction
+    return await run_in_threadpool(redeem_transaction, request, await body(request))
 
 
 @router.get('/keys')
