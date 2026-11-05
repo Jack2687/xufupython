@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {setSubscriptionRegions} from './lib'
 import {onMounted,onUnmounted,ref,computed,defineAsyncComponent,watch} from 'vue'
 import {Layers3,Wallet,LayoutDashboard,ShieldCheck,LogOut,Menu,X,ReceiptText,KeyRound,UserRound,Gift,Sparkles,Bell,Settings2,BookOpen,Check} from 'lucide-vue-next'
 import {api,action,toast,cash,notify,type Row} from './lib'
@@ -29,7 +30,7 @@ const visibleTools=computed(()=>customerNav.value.filter(n=>n[3]==='tools'))
 const permitted=computed(()=>routeAllowed(user.value?.features||pub.value.features,route.value))
 const title=computed(()=>customMenus.value.find((item:Row)=>customPage.value&&item.id===customId.value)?.label||customerNav.value.find(n=>n[0]===route.value)?.[1]||'我的空间');const goProfile=()=>location.hash='/profile'
 async function refresh(){user.value=await api('/me');if(user.value&&route.value==='/home'&&!enabled('home'))location.hash='/profile'}
-async function loadPublic(){pub.value=await api('/public');document.title=`${pub.value.site.name} · ${pub.value.site.english_name}`;const icon=document.querySelector<HTMLLinkElement>('link[rel=icon]');if(icon)icon.href=pub.value.site.icon_url||'/site-icon'}
+async function loadPublic(){pub.value=await api('/public');setSubscriptionRegions(pub.value.countries||[]);document.title=`${pub.value.site.name} · ${pub.value.site.english_name}`;const icon=document.querySelector<HTMLLinkElement>('link[rel=icon]');if(icon)icon.href=pub.value.site.icon_url||'/site-icon'}
 async function authenticated(){await refresh();await loadPublic()}
 async function logout(){await action(async()=>{await api('/auth/logout','POST',{});user.value=null;location.hash='/home'})}
 let refreshTimer:ReturnType<typeof setInterval>;onUnmounted(()=>clearInterval(refreshTimer));

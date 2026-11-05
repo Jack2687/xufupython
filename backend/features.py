@@ -49,8 +49,23 @@ def enforce(request, user):
 
 
 async def enforce_payload(request, user):
-    if user['role'] == 'admin': return
     path = request.url.path.rstrip('/')
+    web_order_flows = {'/api/orders': 'gener_direct_pay', '/api/cslive-go/orders': 'cslive_go_direct_pay',
+                       '/api/cslive-full/orders': 'cslive_full_go'}
+    if request.method == 'POST' and path in web_order_flows:
+        from .common import body
+        from .product_availability import require_product_flow
+        value = await body(request)
+        product_id = value.get('product_id')
+        if isinstance(product_id, str):
+            require_product_flow(product_id.strip(), web_order_flows[path])
+        # Legacy executors keep their existing currency implementation, while
+        # newly submitted regions must still be enabled by the administrator.
+        if path!='/api/cslive-go/orders':
+            from .regions import selected
+            country=value.get('country') or 'PH'
+            if isinstance(country,str):selected(country.strip().upper(),web_order_flows[path])
+    if user['role'] == 'admin': return
     if request.method == 'POST' and (path.endswith('/orders') or path.endswith('/session/inspect')):
         from .common import body
         value = await body(request)

@@ -23,6 +23,12 @@ OPTIONAL = {'site': {'icon'}, 'proxy': {'global_id'}, 'payment': {'checkout_flow
 
 def validate_config(key, v):
     require(key in DEFAULTS, '不支持的配置组')
+    if key=='regions':
+        from .regions import validate
+        require(isinstance(v,dict) and set(v)=={'items'} and isinstance(v['items'],list) and len(v['items'])<=250,'地区配置无效')
+        v['items']=[validate(row) for row in v['items']]
+        require(len({r['code'] for r in v['items']})==len(v['items']),'地区代码重复')
+        return
     if key == 'custom_menus':
         from .custom_menus import validate
         validate(v)
@@ -57,7 +63,8 @@ def validate_config(key, v):
     if key in ('scheduler','payment'):
         require(v['per_user_parallel']<=v['max_parallel'],'用户并发不能大于总并发')
     if key=='scheduler':
-        require(v['default_country'] in COUNTRIES and v['link_mode']=='long' and v['engine'] in ('not_connected','checkout'),'调度配置无效')
+        from .regions import enabled
+        require(v['default_country'] in {r['code'] for r in enabled()} and v['link_mode']=='long' and v['engine'] in ('not_connected','checkout'),'调度配置无效')
     if key=='payment':
         for name in ('cslive_go_visit_return','cslive_go_refresh_before_renewal'):
             if name in v: require(type(v[name]) is bool, name+' 必须为开关')
@@ -69,7 +76,10 @@ def validate_config(key, v):
                     '此订阅流程不受支持，请重新选择流程')
         if 'checkout_type' in v: require(v['checkout_type'] in ('hosted','oaics'),'结账链接类型无效')
         if 'checkout_types' in v:
-            require(isinstance(v['checkout_types'],dict) and set(v['checkout_types'])==set(DEFAULTS['payment']['checkout_types']) and all(t in ('hosted','oaics') for t in v['checkout_types'].values()),'请为每个套餐选择链接类型')
+            supported = set(DEFAULTS['payment']['checkout_types'])
+            require(isinstance(v['checkout_types'],dict)
+                    and supported-{'promax'} <= set(v['checkout_types']) <= supported
+                    and all(t in ('hosted','oaics') for t in v['checkout_types'].values()),'请为每个套餐选择链接类型')
     if key=='proxy':
         require(v['match_country'] is True,'代理必须按订阅地区自动匹配')
         for name in ('default_id','global_id'):
@@ -114,6 +124,8 @@ def validate_config(key, v):
 def settings():
     result = {r['key']:r['value'] for r in db.all('SELECT key,value FROM settings ORDER BY key')}
     result['payment'].setdefault('post_payment_delay_seconds', DEFAULT_SECONDS)
+    if result['payment'].get('subscription_flow') == 'cslive_go_direct_pay':
+        result['payment'].setdefault('checkout_types',dict(DEFAULTS['payment']['checkout_types'])).setdefault('promax','hosted')
     for name in ('cslive_go_visit_return','cslive_go_refresh_before_renewal'):
         result['payment'].setdefault(name, True)
     result['site'].setdefault('icon','')
@@ -143,6 +155,9 @@ async def save_settings(key:str,request:Request):
             q.execute("UPDATE settings SET value=jsonb_set(value,'{registration_open}',$1::jsonb) WHERE key='security'", json.dumps(v['registration_open']))
         for name in OPTIONAL.get(key,set()):
             if name not in v and name in previous: v[name]=previous[name]
+        if key=='payment' and v.get('subscription_flow')=='cslive_go_direct_pay':
+            types=v.setdefault('checkout_types',dict(DEFAULTS['payment']['checkout_types']))
+            types.setdefault('promax',(previous.get('checkout_types') or {}).get('promax','hosted'))
         if key=='payment' and v.get('subscription_flow')=='gener_direct_pay':
             v['checkout_type']='hosted'
             v['checkout_types']={plan:'hosted' for plan in DEFAULTS['payment']['checkout_types']}

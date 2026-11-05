@@ -50,9 +50,12 @@ from test_checkout_diagnostics import CheckoutDiagnosticTests
 from test_redeem_codes import RedeemCodeTests
 from test_auth_security import AuthSecurityTests
 from test_redeem_usage import RedeemUsageTests
+from test_product_plans import ProductPlanTests
+from test_proxy_editing import ProxyEditingTests
+from test_regions import RegionTests
 
 
-class BackendTests(RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(RegionTests,ProxyEditingTests,ProductPlanTests,RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -230,7 +233,7 @@ class BackendTests(RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDi
         data=self.ok(self.client.get('/api/admin/resources'));self.assertNotIn('endpoint_enc',json.dumps(data));self.assertNotIn('fixture:secret',json.dumps(data))
         v['endpoint']='';v['name']='更新代理';self.ok(self.client.put('/api/admin/resources/'+id,json=v));self.assertEqual(raw,db.scalar('SELECT endpoint_enc FROM resources WHERE id=$1',id))
         lease=uid();db.execute("INSERT INTO proxy_leases(id,resource_id,expires_at) VALUES($1,$2,now()+interval '1 minute')",lease,id)
-        v['country']='PH';self.assertEqual(self.client.put('/api/admin/resources/'+id,json=v).status_code,409)
+        v['country']='PH';self.ok(self.client.put('/api/admin/resources/'+id,json=v))
         self.assertEqual(self.client.delete('/api/admin/resources/'+id).status_code,409)
         db.execute('DELETE FROM proxy_leases WHERE id=$1',lease)
         self.ok(self.client.post('/api/admin/resources/'+id+'/global',json={}))

@@ -4,11 +4,13 @@ from . import db
 from .common import *
 from .membership import membership_for,fee_for,fee_source
 from .product_ids import public_id, public_order
+from .product_availability import visible_products
 from .runtime import order_workflows, queue_message, worker_mode
 from . import payment_trace
 from .features import capabilities, project_user
 from .email_auth import security_config, mail_ready
 from .branding import public_site
+from . import regions
 
 public_router=APIRouter(prefix='/api')
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
@@ -71,7 +73,8 @@ def public():
     flow=cfg.get('subscription_flow') or ''
     connected=cfg.get('enabled') is True and flow in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
     flags=capabilities()
-    return {'site':public_site(),'features':flags,'security':dict(security_config(),password_reset_available=mail_ready()),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort') if any(flags[k] for k in ('subscribe','links','membership')) else [],'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected and flags['links'],'payment_connected':connected and flags['subscribe'],'subscription_flow':flow if connected and (flags['subscribe'] or flags['links']) else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers') if flags['membership'] else {}}
+    products=visible_products(db.all('SELECT * FROM products WHERE enabled ORDER BY sort'),flow) if any(flags[k] for k in ('subscribe','links','membership')) else []
+    return {'site':public_site(),'features':flags,'security':dict(security_config(),password_reset_available=mail_ready()),'products':products,'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected and flags['links'],'payment_connected':connected and flags['subscribe'],'subscription_flow':flow if connected and (flags['subscribe'] or flags['links']) else '','countries':regions.enabled(flow),'default_country':regions.default_country(flow),'tiers':config('tiers') if flags['membership'] else {}}
 
 
 @router.get('/overview')
@@ -169,11 +172,11 @@ def _order_list_payment(row):
 
 @router.get('/v1/catalog')
 def catalog(request:Request):
-    m=membership_for(current(request)['id']);products=db.all('SELECT id,name,description,fee,features,tag FROM products WHERE enabled ORDER BY sort')
+    cfg=config('payment')
+    m=membership_for(current(request)['id']);products=visible_products(db.all('SELECT id,name,description,fee,features,tag FROM products WHERE enabled ORDER BY sort'),cfg.get('subscription_flow'))
     for p in products:
         p['member_fee']=fee_for(m,p['fee'],p['id']);p['price_source']=fee_source(m,p['id']);p['id']=public_id(p['id'])
-    countries=[{'code':code,'name':name,'currency':currency} for code,name,currency in [('PH','菲律宾','PHP'),('US','美国','USD'),('JP','日本','JPY'),('SG','新加坡','SGD'),('GB','英国','GBP'),('EG','埃及','EGP'),('TR','土耳其','TRY')]]
-    cfg=config('payment')
+    countries=regions.enabled(cfg.get('subscription_flow'))
     flags=capabilities(current(request))
     return {'items':products,'membership':m if flags['membership'] else None,'unit':'cent_R','countries':countries,'payment_connected':flags['subscribe'] and cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')}
 

@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from . import db, membership, records, renewals, wallet
 from .common import body, config, current, member, require
 from .product_ids import public_order
+from .product_availability import require_product_flow
+from . import regions
 from .customer_contract import OrderRequest, RenewalRequest, TopupRequest, prepare, replay
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(member)])
@@ -11,7 +13,7 @@ router = APIRouter(prefix='/api/v1', dependencies=[Depends(member)])
 
 @router.post('/orders')
 async def create_order(request: Request):
-    prepare(request, OrderRequest, await body(request))
+    payload = prepare(request, OrderRequest, await body(request))
     old = db.one('SELECT id,status,request_hash,deleted_at FROM orders WHERE user_id=$1 AND idempotency_key=$2',
                  current(request)['id'], request.headers['Idempotency-Key'])
     if old:
@@ -23,6 +25,8 @@ async def create_order(request: Request):
     flows = {module.FLOW: module for module in (subscription, subscription_cslive_go, subscription_cslive_full)}
     selected = flows.get(config('payment').get('subscription_flow'))
     require(selected is not None, '当前订阅办理不可用，请联系服务支持', 503)
+    require_product_flow(payload['product_id'], selected.FLOW)
+    regions.selected(payload['country'],selected.FLOW)
     return await selected.create_order(request)
 
 

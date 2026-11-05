@@ -1,6 +1,7 @@
 import os
 from . import db
 from .common import password_hash, uid
+from .regions import DEFAULT_REGIONS
 
 TIERS = [
     {'code':'L1','name':'启程会员','threshold':0,'discount':100,'description':'从第一笔成功订单开始积累'},
@@ -11,6 +12,7 @@ TIERS = [
     {'code':'L9','name':'合作伙伴','threshold':10000000,'discount':20,'description':'服务费减免 80%'},
 ]
 DEFAULTS = {
+    'regions': {'items':DEFAULT_REGIONS},
     'custom_menus': {'items':[]},
     'features': {name: True for name in ('home','subscribe','orders','wallet','links','renewal','keys','invites','membership','docs')},
     'security': {'registration_open':True,'email_verify_enabled':False,'email_domain_whitelist':[]},
@@ -21,7 +23,7 @@ DEFAULTS = {
     'scheduler': {'paused':False,'max_parallel':2,'per_user_parallel':1,'retry_limit':2,'retry_delay_seconds':30,'task_timeout_seconds':180,'queue_limit':500,'default_country':'PH','link_mode':'long','engine':'not_connected'},
     'billing': {'country':'US','allow_customer_edit':True,'address_templates':[]},
     'proxy': {'default_id':'','global_id':'','match_country':True,'request_timeout_seconds':60},
-    'payment': {'enabled':True,'subscription_flow':'','checkout_type':'hosted','checkout_types':{'pro5x':'hosted','pro':'hosted','team':'oaics','team_premium':'oaics','plus':'oaics','go':'oaics'},'max_parallel':2,'per_user_parallel':1,'prepare_timeout_seconds':120,'quote_timeout_seconds':180,'result_timeout_seconds':120,'requests_per_minute':3,'subscription_wait_seconds':600,'renewal_check_interval_seconds':30,'renewal_check_limit':10,'network_restart_limit':2,'activation_check_interval_seconds':5,'activation_check_limit':12,'post_payment_delay_seconds':5,'cslive_go_visit_return':True,'cslive_go_refresh_before_renewal':True,'post_refresh_retries':4,'post_refresh_interval_seconds':3},
+    'payment': {'enabled':True,'subscription_flow':'','checkout_type':'hosted','checkout_types':{'pro5x':'hosted','pro':'hosted','team':'oaics','team_premium':'oaics','plus':'oaics','go':'oaics','promax':'hosted'},'max_parallel':2,'per_user_parallel':1,'prepare_timeout_seconds':120,'quote_timeout_seconds':180,'result_timeout_seconds':120,'requests_per_minute':3,'subscription_wait_seconds':600,'renewal_check_interval_seconds':30,'renewal_check_limit':10,'network_restart_limit':2,'activation_check_interval_seconds':5,'activation_check_limit':12,'post_payment_delay_seconds':5,'cslive_go_visit_return':True,'cslive_go_refresh_before_renewal':True,'post_refresh_retries':4,'post_refresh_interval_seconds':3},
     'tiers': {'items':TIERS},
 }
 
@@ -33,6 +35,7 @@ def seed():
                 value = dict(value, registration_open=q.scalar("SELECT value->'registration_open' FROM settings WHERE key='site'", default=True))
             q.execute('INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT DO NOTHING',key,value)
         products = [('pro5x','Pro 5x','灵活开启，更适合轻量使用','轻量进阶'),('pro','Pro 20x','为高频工作提供充足空间','热门选择'),('team','Team 标准','将团队协作放到同一个空间','团队协作'),('team_premium','Team 高级','为团队成员配置更高使用额度','弹性席位')]
+        products += [('plus','Plus','个人订阅，满足日常使用需求','个人订阅'),('promax','Pro 50x（Pro Max）','更高额度的个人订阅方案','高阶个人')]
         for i, (pid,name,description,tag) in enumerate(products):
             q.execute('INSERT INTO products(id,name,description,fee,sort,tag,features) VALUES($1,$2,$3,10000,$4,$5,$6::jsonb) ON CONFLICT DO NOTHING',pid,name,description,i,tag,'["独立订单记录","费用明细可追溯","在线查看办理进度"]')
         if q.scalar('SELECT count(*) FROM users') == 0:

@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS proxy_leases (
 CREATE INDEX IF NOT EXISTS proxy_leases_capacity ON proxy_leases(resource_id,expires_at);
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_address jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS region_snapshot jsonb NOT NULL DEFAULT '{}';
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS workflow text NOT NULL DEFAULT 'checkout';
 

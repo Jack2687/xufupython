@@ -1,11 +1,7 @@
-import {ref} from 'vue'
+import {ref,reactive} from 'vue'
 export type Row=Record<string,any>
-export const subscriptionRegions=[
- {code:'PH',name:'菲律宾',currency:'PHP'}, {code:'US',name:'美国',currency:'USD'},
- {code:'JP',name:'日本',currency:'JPY'}, {code:'SG',name:'新加坡',currency:'SGD'},
- {code:'EG',name:'埃及',currency:'EGP'}, {code:'TR',name:'土耳其',currency:'TRY'},
- {code:'GB',name:'英国',currency:'GBP'}
-]
+export const subscriptionRegions=reactive<Row[]>([])
+export function setSubscriptionRegions(rows:Row[]){subscriptionRegions.splice(0,subscriptionRegions.length,...rows)}
 export const regionLabel=(code:string)=>{const r=subscriptionRegions.find(r=>r.code===code);return r?`${r.name} · ${r.code}`:code}
 export const toast=ref('')
 let timer:ReturnType<typeof setTimeout>

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from . import db
 from .common import *
 from .product_ids import internal_id, public_id
+from .product_availability import visible_products, require_product_flow
 
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
 SPEND="""SELECT l.user_id,l.order_id,GREATEST(0,-sum(l.amount))::bigint AS spent FROM ledger l JOIN orders o ON o.id=l.order_id AND o.user_id=l.user_id WHERE o.status='succeeded' AND ((l.kind='charge' AND l.amount<0) OR (l.kind='refund' AND l.amount>0)) GROUP BY l.user_id,l.order_id"""
@@ -58,7 +59,7 @@ def me(request: Request):
 @router.get('/v1/membership')
 def membership(request: Request):
     m=membership_for(current(request)['id'])
-    products=db.all('SELECT id,name,description,fee,enabled FROM products ORDER BY sort')
+    products=visible_products(db.all('SELECT id,name,description,fee,enabled FROM products ORDER BY sort'),config('payment').get('subscription_flow'))
     for p in products:
         p['member_fee']=fee_for(m,p['fee'],p['id']);p['saved']=p['fee']-p['member_fee'];p['price_source']=fee_source(m,p['id'])
         if request.url.path.startswith('/api/v1/'):p['id']=public_id(p['id'])
@@ -76,5 +77,6 @@ def quote(request: Request,product_id:str=''):
         require(product is not None,'套餐不存在或已下架',404)
         m=membership_for(current(request)['id'],q)
         payment=config('payment',q)
+        require_product_flow(product_id,payment.get('subscription_flow'))
         connected=payment.get('enabled') is True and payment.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
         return {'fee':fee_for(m,product['fee'],product_id),'standard':product['fee'],'membership':m if allowed('membership',current(request)) else None,'payment_connected':connected and allowed('subscribe',current(request)),'price_source':fee_source(m,product_id)}

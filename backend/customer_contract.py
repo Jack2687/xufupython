@@ -26,7 +26,7 @@ class OrderRequest(Payload):
     workflow: Literal['link', 'subscription']
     product_id: str = Field(min_length=1, max_length=80, pattern=r'^[a-z0-9_]+$')
     session: dict | str
-    country: Literal['PH', 'US', 'JP', 'SG', 'GB', 'EG', 'TR'] = 'PH'
+    country: str = Field(default='PH',pattern=r'^[A-Z]{2}$')
     seats: int = Field(default=1, ge=1, le=100)
     premium_seats: int = Field(default=1, ge=1, le=100)
     workspace_name: str = Field(default='work', min_length=1, max_length=100)

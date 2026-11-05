@@ -39,3 +39,17 @@ test('link and subscription examples remain separate and all guides resolve',()=
   assert.equal(requestExamples(create).subscription.value.product_id,'pro20x')
   assert.ok(!codeSample(create,'https://pay.example.test','node','link').includes('YOUR_CARD_NUMBER'))
 })
+
+test('Plus and Pro Max docs offer the actual catalog IDs and both workflows',()=>{
+  const create=operations.find(x=>x.op.operationId==='create_order')
+  for(const id of ['plus','promax']){
+    assert.ok(spec['x-product-examples'].some(p=>p.id===id))
+    for(const workflow of ['link','subscription']){
+      const key=id+'_'+workflow,example=requestExamples(create)[key].value
+      assert.equal(example.product_id,id)
+      assert.equal(example.workflow,workflow)
+      assert.equal(Boolean(example.card),workflow==='subscription')
+      for(const lang of ['curl','python','node'])assert.ok(codeSample(create,'https://pay.example.test',lang,key).includes(id))
+    }
+  }
+})

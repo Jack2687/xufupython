@@ -66,7 +66,7 @@ async def save_resource(request:Request,id:str=''):
     name=v.get('name','');country=v.get('country','')
     require(isinstance(name,str) and isinstance(country,str),'资源参数无效')
     name=name.strip();country=country.strip().upper()
-    require(1<=length(name)<=80 and country in COUNTRIES and type(v.get('enabled')) is bool,'资源参数无效')
+    require(1<=length(name)<=80 and re.fullmatch('[A-Z]{2}',country) and type(v.get('enabled')) is bool,'资源参数无效')
     integer(v.get('weight'),1,100);integer(v.get('capacity'),1,100)
     if 'vendor' in v: require(v['vendor'] in ('iproyal','cliproxy','other'),'请选择代理厂商')
     if 'ip_mode' in v: require(v['ip_mode'] in ('dynamic','static'),'请选择动态或静态代理')
@@ -77,10 +77,14 @@ async def save_resource(request:Request,id:str=''):
         q.execute('SELECT pg_advisory_xact_lock(1886003)')
         previous=q.one('SELECT country,vendor,ip_mode FROM resources WHERE id=$1 FOR UPDATE',id) if not fresh else {}
         require(fresh or previous is not None,'代理不存在',404)
+        from .regions import items as region_items
+        require(country in {r['code'] for r in region_items(q)} or (not fresh and previous['country']==country),'请选择已配置的订阅地区')
         vendor=v.get('vendor',previous.get('vendor','iproyal' if endpoint and urlsplit(endpoint).hostname=='geo.iproyal.com' else 'other'))
         mode=v.get('ip_mode',previous.get('ip_mode','dynamic'))
         changed=not fresh and (enc or previous['country']!=country or previous['vendor']!=vendor or previous['ip_mode']!=mode)
-        if changed: require(not q.scalar('SELECT count(*) FROM proxy_leases WHERE resource_id=$1 AND expires_at>now()',id),'代理正在执行任务，暂时不能更换连接参数',409)
+        # Leases reserve capacity and can outlive the request; they are not an
+        # edit lock. Running clients and order_proxy_sessions already retain
+        # their endpoint snapshot. Resource edits apply to future acquisitions.
         if fresh:
             q.execute('INSERT INTO resources(id,name,country,endpoint_enc,enabled,weight,capacity,vendor,ip_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',id,name,country,enc,v['enabled'],v['weight'],v['capacity'],vendor,mode)
         else:

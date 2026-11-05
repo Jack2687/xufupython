@@ -14,6 +14,7 @@ import requests
 from fastapi import APIRouter, Depends, Request
 from .customer_contract import order_hash
 from .product_ids import internal_id
+from . import regions
 
 from . import db, payment_trace as trace
 from . import cslive_go_checkout
@@ -202,7 +203,7 @@ async def create_order(request: Request):
     if request.url.path.startswith('/api/v1/'):product_id = internal_id(product_id)
     require(product_id, '请选择套餐')
     country = str(v.get('country') or 'PH').strip().upper()
-    require(country in COUNTRIES, '不支持的订阅地区')
+    require(len(country)==2, '不支持的订阅地区')
 
     try:
         seats = int(v.get('seats', 1))
@@ -237,6 +238,7 @@ async def create_order(request: Request):
         )
 
     with db.transaction() as q:
+        q.execute("SELECT value FROM settings WHERE key='regions' FOR SHARE")
         product = q.one('SELECT id,name,fee,enabled FROM products WHERE id=$1', product_id)
         require(product and product['enabled'], '套餐不存在或已下架', 404)
 
@@ -246,6 +248,8 @@ async def create_order(request: Request):
         if old:
             require(old.get('request_hash') == rh, '同一 Idempotency-Key 不能用于不同请求', 409)
             return {'id': old['id'], 'status': old['status'], 'replayed': True}
+
+        region=regions.selected(country,FLOW,q)
 
         m = membership_for(user['id'], q)
         fee = fee_for(m, product['fee'], product_id) if workflow == 'subscription' else 0
@@ -270,6 +274,7 @@ async def create_order(request: Request):
             country, seats, fee, workflow, keep_renewal, price_snapshot, billing_address, idem_key, rh,
             'api' if hasattr(request.state, 'customer_hash') else 'web'
         )
+        q.execute('UPDATE orders SET region_snapshot=$2 WHERE id=$1',order_id,region)
         trace.record('accepted', 'completed', order_id=order_id, q=q)
         trace.record('billing', 'completed', 'billing_selected', order_id=order_id,
                      diagnostics={'email_source': billing_address['email_source']}, q=q)
@@ -315,7 +320,7 @@ def claim_subscription():
             return None
         row = q.one(
             "SELECT o.id,o.user_id,o.product_id,o.product_name,o.email,o.country,o.seats,"
-            "o.keep_renewal,o.fee,o.billing_address,o.price_snapshot,o.workflow,"
+            "o.keep_renewal,o.fee,o.billing_address,o.price_snapshot,o.workflow,o.region_snapshot,"
             "s.credentials_enc,s.credentials_expires_at,s.card_enc,s.workspace_name,s.premium_seats,s.billing_snapshot,s.session_id,s.subscription_flow,"
             "s.network_retry_count,s.checkout_checkpoint_enc"
             " FROM orders o JOIN subscription_runs s ON s.order_id=o.id"
@@ -426,7 +431,8 @@ def run_subscription(job: dict):
             _add_event(order_id, 'checkout', '正在调用 cs-live Go 程序生成结账链接…')
 
         plan_canonical = cslive_go_checkout._normalize_plan(product_id)
-        currency = CURRENCY.get(country, 'USD')
+        region=regions.order_region(country,job.get('region_snapshot'))
+        currency = region['currency']
 
         if cached:
             link_result = cached['result']
@@ -459,8 +465,8 @@ def run_subscription(job: dict):
         cs_id = link_result['checkoutSessionId']
 
         actual_country = str(link_result.get('billingCountry') or country).upper()
-        actual_currency = str(link_result.get('billingCurrency') or CURRENCY.get(country, 'USD')).upper()
-        if actual_country != country or actual_currency != CURRENCY.get(country, 'USD'):
+        actual_currency = str(link_result.get('billingCurrency') or currency).upper()
+        if actual_country != country or actual_currency != currency:
             _add_event(order_id, 'country_aligned',
                        f'账单国家/币种已对齐出口：{actual_country}/{actual_currency}')
             db.execute("UPDATE orders SET country=$2,updated_at=now() WHERE id=$1", order_id, actual_country)

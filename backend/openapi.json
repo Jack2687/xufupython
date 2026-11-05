@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "序付 API",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "面向序付用户的服务端接入 API：订阅办理、生成结账链接、关闭自动续费、订单查询、账户与资金管理。\n\n功能权限由后台设置控制。关闭的功能返回 403；关闭开发接入后已有 API 密钥也暂停使用。通过 GET /api/v1/me 的 features 查看当前开放功能。密码通过邮箱重置后，旧 API 密钥将失效，需登录重新生成。"
   },
   "servers": [
@@ -200,7 +200,7 @@
       "get": {
         "operationId": "get_catalog",
         "summary": "查询套餐",
-        "description": "返回已开放套餐、当前账户服务费和支持的订阅地区。后续新增套餐也从 items[].id 获取接口标识，再传给报价和下单的 product_id；Pro 20x 的标识为 pro20x。",
+        "description": "返回已开放套餐、当前账户服务费和支持的订阅地区。后续新增套餐也从 items[].id 获取接口标识，再传给报价和下单的 product_id；Pro 20x 的标识为 pro20x。 Plus 传 plus，Pro 50x（Pro Max）传 promax；实际开放的套餐以 GET /api/v1/catalog 返回为准。 countries 是当前后台启用且可办理的订阅国家列表；禁用或删除的地区不会返回。无需另调国家接口。",
         "security": [
           {
             "BearerKey": []
@@ -261,6 +261,26 @@
                     {
                       "id": "pro5x",
                       "name": "Pro 5x",
+                      "description": "",
+                      "fee": 10000,
+                      "member_fee": 10000,
+                      "tag": "",
+                      "features": [],
+                      "price_source": "membership"
+                    },
+                    {
+                      "id": "plus",
+                      "name": "Plus",
+                      "description": "",
+                      "fee": 10000,
+                      "member_fee": 10000,
+                      "tag": "",
+                      "features": [],
+                      "price_source": "membership"
+                    },
+                    {
+                      "id": "promax",
+                      "name": "Pro 50x（Pro Max）",
                       "description": "",
                       "fee": 10000,
                       "member_fee": 10000,
@@ -651,7 +671,7 @@
             "name": "product_id",
             "in": "query",
             "required": true,
-            "description": "套餐接口标识：Pro 5x 传 pro5x，Pro 20x 传 pro20x，Team 标准传 team，Team 高级传 team_premium。实际开放及新增套餐以 GET /api/v1/catalog 的 items[].id 为准，按返回值原样传入。 来源：调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
+            "description": "套餐接口标识：Pro 5x 传 pro5x，Pro 20x 传 pro20x，Team 标准传 team，Team 高级传 team_premium。实际开放及新增套餐以 GET /api/v1/catalog 的 items[].id 为准，按返回值原样传入。 来源：调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。 Plus 传 plus，Pro 50x（Pro Max）传 promax；实际开放的套餐以 GET /api/v1/catalog 返回为准。",
             "schema": {
               "type": "string"
             },
@@ -1583,7 +1603,7 @@
       "post": {
         "operationId": "create_order",
         "summary": "提交订阅或生成结账链接",
-        "description": "subscription 提交订阅办理并冻结服务费；link 仅生成链接，不自动付款、不收取该笔订阅服务费。返回 id 后使用订单详情查询。请求按站点当前办理方式受理，客户无需指定内部流程。 管理员删除的订单不再返回；访问该订单详情返回 404，原 Idempotency-Key 仍被保留，再次提交返回 409，避免误重复下单。",
+        "description": "subscription 提交订阅办理并冻结服务费；link 仅生成链接，不自动付款、不收取该笔订阅服务费。返回 id 后使用订单详情查询。请求按站点当前办理方式受理，客户无需指定内部流程。 管理员删除的订单不再返回；访问该订单详情返回 404，原 Idempotency-Key 仍被保留，再次提交返回 409，避免误重复下单。 Plus 传 plus，Pro 50x（Pro Max）传 promax；实际开放的套餐以 GET /api/v1/catalog 返回为准。",
         "tags": [
           "订阅与结账链接"
         ],
@@ -1777,6 +1797,102 @@
                   "value": {
                     "workflow": "link",
                     "product_id": "pro5x",
+                    "country": "PH",
+                    "session": {
+                      "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
+                      "user": {
+                        "email": "account@example.com"
+                      },
+                      "account": {
+                        "id": "ACCOUNT_ID",
+                        "planType": "free"
+                      },
+                      "expires": "2030-01-01T00:00:00Z",
+                      "sessionToken": "YOUR_SESSION_TOKEN"
+                    }
+                  }
+                },
+                "plus_subscription": {
+                  "summary": "Plus 订阅办理",
+                  "value": {
+                    "workflow": "subscription",
+                    "product_id": "plus",
+                    "country": "PH",
+                    "session": {
+                      "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
+                      "user": {
+                        "email": "account@example.com"
+                      },
+                      "account": {
+                        "id": "ACCOUNT_ID",
+                        "planType": "free"
+                      },
+                      "expires": "2030-01-01T00:00:00Z",
+                      "sessionToken": "YOUR_SESSION_TOKEN"
+                    },
+                    "accepted": true,
+                    "keep_renewal": false,
+                    "card": {
+                      "number": "YOUR_CARD_NUMBER",
+                      "month": "12",
+                      "year": "2030",
+                      "cvc": "YOUR_CVC"
+                    }
+                  }
+                },
+                "plus_link": {
+                  "summary": "Plus 仅生成结账链接",
+                  "value": {
+                    "workflow": "link",
+                    "product_id": "plus",
+                    "country": "PH",
+                    "session": {
+                      "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
+                      "user": {
+                        "email": "account@example.com"
+                      },
+                      "account": {
+                        "id": "ACCOUNT_ID",
+                        "planType": "free"
+                      },
+                      "expires": "2030-01-01T00:00:00Z",
+                      "sessionToken": "YOUR_SESSION_TOKEN"
+                    }
+                  }
+                },
+                "promax_subscription": {
+                  "summary": "Pro 50x（Pro Max） 订阅办理",
+                  "value": {
+                    "workflow": "subscription",
+                    "product_id": "promax",
+                    "country": "PH",
+                    "session": {
+                      "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
+                      "user": {
+                        "email": "account@example.com"
+                      },
+                      "account": {
+                        "id": "ACCOUNT_ID",
+                        "planType": "free"
+                      },
+                      "expires": "2030-01-01T00:00:00Z",
+                      "sessionToken": "YOUR_SESSION_TOKEN"
+                    },
+                    "accepted": true,
+                    "keep_renewal": false,
+                    "card": {
+                      "number": "YOUR_CARD_NUMBER",
+                      "month": "12",
+                      "year": "2030",
+                      "cvc": "YOUR_CVC"
+                    }
+                  }
+                },
+                "promax_link": {
+                  "summary": "Pro 50x（Pro Max） 仅生成结账链接",
+                  "value": {
+                    "workflow": "link",
+                    "product_id": "promax",
                     "country": "PH",
                     "session": {
                       "accessToken": "YOUR_ACCOUNT_ACCESS_TOKEN",
@@ -3904,7 +4020,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。"
+            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。 Plus 传 plus，Pro 50x（Pro Max）传 promax；实际开放的套餐以 GET /api/v1/catalog 返回为准。"
           },
           "name": {
             "type": "string",
@@ -4037,7 +4153,7 @@
           },
           "product_id": {
             "type": "string",
-            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。"
+            "description": "套餐接口标识，取自 GET /api/v1/catalog 的 items[].id。Pro 20x 使用 pro20x；新增且已开放的套餐同样传入其 id，不使用显示名称。 Plus 传 plus，Pro 50x（Pro Max）传 promax；实际开放的套餐以 GET /api/v1/catalog 返回为准。"
           },
           "product_name": {
             "type": "string",
@@ -4343,13 +4459,15 @@
           },
           "product_id": {
             "type": "string",
-            "description": "套餐接口标识：Pro 5x 传 pro5x，Pro 20x 传 pro20x，Team 标准传 team，Team 高级传 team_premium。实际开放及新增套餐以 GET /api/v1/catalog 的 items[].id 为准，按返回值原样传入。 来源：调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
+            "description": "套餐接口标识：Pro 5x 传 pro5x，Pro 20x 传 pro20x，Team 标准传 team，Team 高级传 team_premium。实际开放及新增套餐以 GET /api/v1/catalog 的 items[].id 为准，按返回值原样传入。 来源：调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。 Plus 传 plus，Pro 50x（Pro Max）传 promax；实际开放的套餐以 GET /api/v1/catalog 返回为准。",
             "minLength": 1,
             "maxLength": 80,
             "pattern": "^[a-z0-9_]+$",
             "examples": [
               "pro20x",
-              "pro5x"
+              "pro5x",
+              "plus",
+              "promax"
             ],
             "x-input-source": "调用 GET /api/v1/catalog，按套餐名称选择一条 items 记录，将它的 id 原样作为 product_id；例如 items 中 Pro 20x 的 id 为 pro20x。",
             "x-source-operations": [
@@ -4379,24 +4497,16 @@
           },
           "country": {
             "type": "string",
-            "description": "订阅地区，使用套餐接口返回的地区代码。 来源：调用 GET /api/v1/catalog，从 countries[].code 选择地区代码传入，例如 US；不要传 countries[].name 或 currency。省略时使用 PH。",
-            "enum": [
-              "PH",
-              "US",
-              "JP",
-              "SG",
-              "GB",
-              "EG",
-              "TR"
-            ],
+            "description": "订阅地区代码，调用 GET /api/v1/catalog，从 countries[].code 选择一个当前启用的地区。name 和 currency 仅供展示，不传入这两个字段。省略时使用 PH；如果 PH 已停用，须明确选择列表中的地区。下单后按当时的国家及币种执行，后台后续修改不影响已受理订单。",
             "default": "PH",
-            "x-input-source": "调用 GET /api/v1/catalog，从 countries[].code 选择地区代码传入，例如 US；不要传 countries[].name 或 currency。省略时使用 PH。",
+            "x-input-source": "订阅地区代码，调用 GET /api/v1/catalog，从 countries[].code 选择一个当前启用的地区。name 和 currency 仅供展示，不传入这两个字段。省略时使用 PH；如果 PH 已停用，须明确选择列表中的地区。下单后按当时的国家及币种执行，后台后续修改不影响已受理订单。",
             "x-source-operations": [
               {
                 "operationId": "get_catalog",
                 "label": "GET /api/v1/catalog"
               }
-            ]
+            ],
+            "pattern": "^[A-Z]{2}$"
           },
           "seats": {
             "type": "integer",
@@ -5226,6 +5336,14 @@
     {
       "id": "team_premium",
       "name": "Team 高级"
+    },
+    {
+      "id": "plus",
+      "name": "Plus"
+    },
+    {
+      "id": "promax",
+      "name": "Pro 50x（Pro Max）"
     }
   ],
   "x-input-sources": [
