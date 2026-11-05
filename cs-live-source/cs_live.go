@@ -1096,6 +1096,7 @@ func (s *checkpointstore_Store) Close() error {
 
 type cli_arguments struct {
 	Country, Plan, Session, Currency, Timezone, Proxy, CheckoutType string
+	PromoCodeEnv                                                   string
 	BrowserProfile                                                  string
 	TLSCert, TLSKey                                                 string
 	WithPrice, Debug                                                bool
@@ -1143,6 +1144,7 @@ func cli_parseArguments(argv []string, payment bool, stderr io.Writer) (cli_argu
 		f.Int64Var(&a.Expected, "expected-amount", 0, "可选：必须匹配的含税金额（最小币种单位）")
 	} else {
 		f.BoolVar(&a.WithPrice, "with-price", false, "读取本次 Checkout 价格快照，不计算税费或付款")
+		f.StringVar(&a.PromoCodeEnv, "promo-code-env", "", "读取指定环境变量中的自定义 Team 优惠码；留空时不传")
 	}
 	if err := f.Parse(argv); err != nil {
 		return a, err
@@ -1154,6 +1156,9 @@ func cli_parseArguments(argv []string, payment bool, stderr io.Writer) (cli_argu
 	}
 	if a.Plan != "" && model_CheckoutPlan(a.Plan) == "" {
 		return fail("--plan must be plus, pro5x, pro20x, promax, go, team or team5x")
+	}
+	if a.PromoCodeEnv != "" && (!model_IsTeamPlan(a.Plan) || !protocol_Matches(`[A-Za-z_][A-Za-z0-9_]{0,127}`, a.PromoCodeEnv)) {
+		return fail("--promo-code-env requires a Team plan and a valid environment variable name")
 	}
 	if _, err := model_NormalizeTeamSeatConfig(a.Plan, a.Seats, a.Seats5x, a.Interval); err != nil {
 		if (a.Seats != 0 || a.Seats5x != 0) && !model_IsTeamPlan(a.Plan) {
@@ -1329,7 +1334,7 @@ func (r *cli_Runner) CreateCheckout(ctx context.Context, argv []string) (code in
 			code = 1
 		}
 	}()
-	result, err := r.ClientFactory(a.config(), gptpay_ClientOptions{EventSink: r.observer(a.Debug)}).CreateCheckout(ctx, session, gptpay_CreateCheckoutOptions{Country: a.Country, Plan: a.Plan, Seats: a.Seats, Seats5x: a.Seats5x, Interval: a.Interval, CheckoutType: a.CheckoutType, WithPrice: a.WithPrice, FingerprintClockOffsetHours: a.Offset})
+	result, err := r.ClientFactory(a.config(), gptpay_ClientOptions{EventSink: r.observer(a.Debug)}).CreateCheckout(ctx, session, gptpay_CreateCheckoutOptions{Country: a.Country, Plan: a.Plan, Seats: a.Seats, Seats5x: a.Seats5x, Interval: a.Interval, CheckoutType: a.CheckoutType, WithPrice: a.WithPrice, FingerprintClockOffsetHours: a.Offset, PromoCode: os.Getenv(a.PromoCodeEnv)})
 	if err != nil {
 		output["error_code"] = observability_SafeErrorCode(err)
 		return 1

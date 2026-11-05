@@ -7,6 +7,7 @@ from .common import *
 from .wallet import credit
 from .membership import membership_from,SPEND
 from .product_ids import internal_id
+from .product_availability import visible_products
 
 router=APIRouter(prefix='/api/admin',dependencies=[Depends(administrator)])
 
@@ -51,7 +52,8 @@ def users(q: str=''):
         prices.setdefault(row['user_id'],{})[row['product_id']]=row['fee']
     for row in rows:
         row['membership']=membership_from(row,row['spent']);row['product_prices']=prices.get(row['id'],{})
-    return {'items':rows,'tiers':config('tiers')['items'],'products':db.all('SELECT id,name,fee FROM products WHERE enabled ORDER BY sort,id')}
+    products=visible_products(db.all('SELECT id,name,fee FROM products WHERE enabled ORDER BY sort,id'),config('payment').get('subscription_flow'))
+    return {'items':rows,'tiers':config('tiers')['items'],'products':products}
 
 
 def account_options(q,request,id,value):
@@ -65,13 +67,14 @@ def account_options(q,request,id,value):
         q.execute('UPDATE users SET membership_code=$2,membership_until=$3 WHERE id=$1',id,code,until)
     if 'product_prices' in value:
         prices=value['product_prices'];require(isinstance(prices,dict) and len(prices)<=200,'套餐专属价格格式无效')
-        enabled={p['id'] for p in q.all('SELECT id FROM products WHERE enabled')}
+        enabled={p['id'] for p in visible_products(q.all('SELECT id FROM products WHERE enabled'),config('payment',q).get('subscription_flow'))}
         normalized={}
         for product,fee in prices.items():
             require(isinstance(product,str) and internal_id(product) in enabled,'只能设置已开放套餐的价格')
             product=internal_id(product);require(product not in normalized,'套餐价格重复')
             normalized[product]=integer(fee,0,100000000,'套餐价格须为有效的非负整数金额')
-        q.execute('DELETE FROM user_product_prices WHERE user_id=$1 AND product_id IN (SELECT id FROM products WHERE enabled)',id)
+        # Preserve prices hidden by the current flow, including historical Team premium.
+        q.execute('DELETE FROM user_product_prices WHERE user_id=$1 AND product_id=ANY($2)',id,list(enabled))
         for product,fee in normalized.items():
             q.execute('INSERT INTO user_product_prices(user_id,product_id,fee) VALUES($1,$2,$3)',id,product,fee)
         audit(q,request,'user.product_pricing',id,'更新开放套餐专属价格：'+','.join(normalized))

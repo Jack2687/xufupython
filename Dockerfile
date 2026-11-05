@@ -18,6 +18,7 @@ WORKDIR /build/cslive
 COPY cs-live-source/go.mod cs-live-source/go.sum ./
 RUN go mod download
 COPY cs-live-source/ ./
+RUN CGO_ENABLED=0 go test ./...
 RUN CGO_ENABLED=0 go build -trimpath -o /cs_live .
 
 FROM python:3.11-slim-bookworm AS runtime

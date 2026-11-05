@@ -12,8 +12,10 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import requests
 from fastapi import APIRouter, Depends, Request
-from .customer_contract import order_hash
+from .customer_contract import order_hash, order_request_matches
 from .product_ids import internal_id
+from .product_availability import display_product, require_product_flow
+from .team_subscription import seat_counts, promo_code as validate_promo_code
 from . import regions
 
 from . import db, payment_trace as trace
@@ -183,7 +185,7 @@ def _billing_snapshot(profile, account_email):
 
 @router.post('/orders')
 async def create_order(request: Request):
-    v = await body(request)
+    v = getattr(request.state,'customer_payload',None) or await body(request)
     workflow = v.get('workflow', 'link')
     user = current(request)
     cfg = config('payment')
@@ -205,16 +207,17 @@ async def create_order(request: Request):
     country = str(v.get('country') or 'PH').strip().upper()
     require(len(country)==2, '不支持的订阅地区')
 
-    try:
-        seats = int(v.get('seats', 1))
-        premium_seats = int(v.get('premium_seats', 1))
-    except (TypeError, ValueError):
-        raise BusinessError('席位数量无效')
-    require(1 <= seats <= 100, '席位数量无效')
-    require(1 <= premium_seats <= seats, '高级席位数量无效')
+    seats = v.get('seats', 2 if product_id=='team' else 1)
+    premium_seats = v.get('premium_seats', 0 if product_id=='team' else 1)
+    if product_id in ('team','team_premium'):
+        seat_counts(seats,premium_seats)
+    else:
+        require(type(seats) is int and 1<=seats<=100, '席位数量无效')
+        require(type(premium_seats) is int and 0<=premium_seats<=seats, '高级席位数量无效')
+    promotion=validate_promo_code(v.get('promo_code',''),product_id)
 
     keep_renewal = bool(v.get('keep_renewal', False))
-    workspace_name = str(v.get('workspace_name') or 'work').strip() or 'work'
+    workspace_name = 'Team' if product_id.startswith('team') else str(v.get('workspace_name') or 'work').strip() or 'work'
     idem_key = request.headers.get('Idempotency-Key', '')
     require(8 <= len(idem_key) <= 120, '请提供 8～120 位 Idempotency-Key')
 
@@ -225,6 +228,7 @@ async def create_order(request: Request):
         session_raw if isinstance(session_raw, dict) else json.loads(session_raw) if isinstance(session_raw, str) else {},
         sess_info,
     )
+    if promotion:c['team_promo_code']=promotion
 
     card = v.get('card')
     if workflow == 'subscription':
@@ -242,13 +246,18 @@ async def create_order(request: Request):
         product = q.one('SELECT id,name,fee,enabled FROM products WHERE id=$1', product_id)
         require(product and product['enabled'], '套餐不存在或已下架', 404)
 
-        rh = order_hash(q, request, digest(json.dumps([workflow, product_id, country, seats], ensure_ascii=False)))
+        signature=[workflow,product_id,country,seats]
+        if product_id=='team':signature.extend([premium_seats,promotion])
+        rh = order_hash(q, request, digest(json.dumps(signature, ensure_ascii=False)))
         old = q.one('SELECT id,status,request_hash FROM orders WHERE user_id=$1 AND idempotency_key=$2',
                     user['id'], idem_key)
         if old:
-            require(old.get('request_hash') == rh, '同一 Idempotency-Key 不能用于不同请求', 409)
+            matches=order_request_matches(request,old.get('request_hash')) if hasattr(request.state,'customer_hash') else old.get('request_hash')==rh
+            require(matches, '同一 Idempotency-Key 不能用于不同请求', 409)
             return {'id': old['id'], 'status': old['status'], 'replayed': True}
 
+        require_product_flow(product_id,FLOW)
+        product=display_product(product,FLOW)
         region=regions.selected(country,FLOW,q)
 
         m = membership_for(user['id'], q)
@@ -452,6 +461,7 @@ def run_subscription(job: dict):
                 proxy_url=proxy_url,
                 seats=job['seats'],
                 seats_5x=job.get('premium_seats', 1),
+                promo_code=creds.get('team_promo_code',''),
                 interval='month',
                 checkout_type=checkout_type,
                 currency=currency,

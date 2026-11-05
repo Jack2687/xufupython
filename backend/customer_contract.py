@@ -28,8 +28,9 @@ class OrderRequest(Payload):
     session: dict | str
     country: str = Field(default='PH',pattern=r'^[A-Z]{2}$')
     seats: int = Field(default=1, ge=1, le=100)
-    premium_seats: int = Field(default=1, ge=1, le=100)
+    premium_seats: int = Field(default=1, ge=0, le=100)
     workspace_name: str = Field(default='work', min_length=1, max_length=100)
+    promo_code: str = Field(default='', max_length=256)
     keep_renewal: bool = False
     accepted: bool = False
     card: Card | None = None
@@ -57,6 +58,13 @@ def prepare(request, model, payload):
             require(isinstance(value['session'], dict), 'Session 必须是 JSON 对象')
         if model is OrderRequest:
             value['product_id'] = internal_id(value['product_id'])
+            from .team_subscription import promo_code
+            code=promo_code(value.pop('promo_code'),value['product_id'])
+            legacy=dict(value)
+            if value['product_id']=='team':
+                if 'seats' not in payload:value['seats']=2
+                if 'premium_seats' not in payload:value['premium_seats']=0
+            if code:value['promo_code']=code
             require(value['premium_seats'] <= value['seats'], '高级席位不能超过总席位')
             if value['workflow'] == 'subscription':
                 require(value['accepted'] is True, '请确认服务约定')
@@ -69,9 +77,21 @@ def prepare(request, model, payload):
         raise BusinessError('请检查参数类型、必填项和取值范围：' + fields) from None
     except (ValueError, TypeError):
         raise BusinessError('Session JSON 格式不正确') from None
-    request.state.customer_hash = 'api2:' + hmac.new(
+    # New Team defaults must not collide with the old request representation.
+    prefix='api3:' if model is OrderRequest and value['product_id']=='team' else 'api2:'
+    request.state.customer_hash = prefix + hmac.new(
         os.environ['MASTER_KEY'].encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    if model is OrderRequest:
+        request.state.customer_payload=value
+        request.state.customer_legacy_hash=''
+        if not code and prefix=='api3:':
+            previous=json.dumps(legacy,sort_keys=True,separators=(',',':'),ensure_ascii=False)
+            request.state.customer_legacy_hash='api2:'+hmac.new(os.environ['MASTER_KEY'].encode(),previous.encode(),hashlib.sha256).hexdigest()
     return value
+
+
+def order_request_matches(request, saved):
+    return saved in {request.state.customer_hash, getattr(request.state,'customer_legacy_hash','')} and bool(saved)
 
 
 def order_hash(q, request, legacy):

@@ -6,7 +6,7 @@ from .common import body, config, current, member, require
 from .product_ids import public_order
 from .product_availability import require_product_flow
 from . import regions
-from .customer_contract import OrderRequest, RenewalRequest, TopupRequest, prepare, replay
+from .customer_contract import OrderRequest, RenewalRequest, TopupRequest, prepare, replay, order_request_matches
 
 router = APIRouter(prefix='/api/v1', dependencies=[Depends(member)])
 
@@ -18,13 +18,14 @@ async def create_order(request: Request):
                  current(request)['id'], request.headers['Idempotency-Key'])
     if old:
         require(old['deleted_at'] is None, '原订单已删除；此请求标识不能再次下单', 409)
-        require(old['request_hash'] == request.state.customer_hash,
+        require(order_request_matches(request,old['request_hash']),
                 '同一 Idempotency-Key 不能用于不同请求', 409)
         return {'id': old['id'], 'status': old['status'], 'replayed': True}
     from . import subscription, subscription_cslive_go, subscription_cslive_full
     flows = {module.FLOW: module for module in (subscription, subscription_cslive_go, subscription_cslive_full)}
     selected = flows.get(config('payment').get('subscription_flow'))
     require(selected is not None, '当前订阅办理不可用，请联系服务支持', 503)
+    require(not payload.get('promo_code') or selected.FLOW=='cslive_go_direct_pay', '当前流程不支持自定义优惠码')
     require_product_flow(payload['product_id'], selected.FLOW)
     regions.selected(payload['country'],selected.FLOW)
     return await selected.create_order(request)

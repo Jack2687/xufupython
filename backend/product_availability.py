@@ -6,11 +6,20 @@ FLOW_PRODUCTS = frozenset({'plus', 'promax'})
 
 
 def available(product_id, flow):
+    if flow == GO_HTTP_FLOW and product_id == 'team_premium':
+        return False
     return product_id not in FLOW_PRODUCTS or flow == GO_HTTP_FLOW
 
 
 def visible_products(rows, flow):
-    return [row for row in rows if available(row['id'], flow)]
+    return [display_product(row, flow) for row in rows if available(row['id'], flow)]
+
+
+def display_product(row, flow):
+    if row['id'] == 'team' and flow == GO_HTTP_FLOW:
+        row = dict(row, name='Team团队订阅')
+        if 'description' in row:row['description']='按需组合普通席位与高级席位'
+    return row
 
 
 def require_product_flow(product_id, flow):

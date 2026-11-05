@@ -56,6 +56,8 @@ async def enforce_payload(request, user):
         from .common import body
         from .product_availability import require_product_flow
         value = await body(request)
+        if path!='/api/cslive-go/orders':
+            require(not value.get('promo_code'), '当前流程不支持自定义优惠码')
         product_id = value.get('product_id')
         if isinstance(product_id, str):
             require_product_flow(product_id.strip(), web_order_flows[path])

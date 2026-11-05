@@ -6,12 +6,16 @@ from fastapi import APIRouter,Depends,Request,Query
 from fastapi.responses import Response
 from . import db
 from .common import *
+from .product_availability import display_product, GO_HTTP_FLOW
 
 router=APIRouter(prefix='/api/admin',dependencies=[Depends(administrator)])
 
 
 @router.get('/products')
-def products(): return {'items':db.all('SELECT * FROM products ORDER BY sort')}
+def products():
+    flow=config('payment').get('subscription_flow')
+    rows=db.all('SELECT * FROM products ORDER BY sort')
+    return {'items':[display_product(p,flow) for p in rows if flow!=GO_HTTP_FLOW or p['id']!='team_premium']}
 
 
 @router.put('/products/{id}')

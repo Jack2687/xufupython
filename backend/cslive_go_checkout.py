@@ -16,6 +16,7 @@ from typing import Any
 
 from . import payment_trace as trace
 from .checkout_errors import CheckoutError
+from .team_subscription import seat_counts, promo_code as validate_promo_code
 
 log = logging.getLogger('xufu.cslive_go_checkout')
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,7 +97,8 @@ def create_checkout(
     plan: str,
     proxy_url: str,
     seats: int = 1,
-    seats_5x: int = 1,
+    seats_5x: int = 0,
+    promo_code: str = '',
     interval: str = 'month',
     checkout_type: str = 'hosted',
     currency: str = '',
@@ -115,6 +117,8 @@ def create_checkout(
     executable = binary_path()
     canonical = _normalize_plan(plan)
     is_team = canonical in ('team', 'team5x')
+    promotion=validate_promo_code(promo_code,'team' if is_team else canonical)
+    environment=None
     session_json = _build_session_json(session)
     with trace.request('checkout_create') as diagnostic:
         if not executable.is_file():
@@ -127,11 +131,15 @@ def create_checkout(
             '--checkout-type', checkout_type,
         ]
         if is_team:
+            ordinary, premium = seat_counts(seats, seats_5x)
             args += [
-                '--seats', str(max(2, int(seats))),
-                '--seats-5x', str(max(1, int(seats_5x))),
+                '--seats', str(ordinary),
+                '--seats-5x', str(premium),
                 '--interval', interval if interval in ('month', 'year') else 'month',
             ]
+        if promotion:
+            environment=dict(os.environ,XUFU_TEAM_PROMO_CODE=promotion)
+            args += ['--promo-code-env','XUFU_TEAM_PROMO_CODE']
         if currency:
             args += ['--currency', currency.upper()]
         if timezone:
@@ -152,6 +160,7 @@ def create_checkout(
                 cwd=str(executable.parent),
                 timeout=timeout_sec,
                 creationflags=flags,
+                env=environment,
             )
         except subprocess.TimeoutExpired:
             raise CheckoutError('timeout') from None

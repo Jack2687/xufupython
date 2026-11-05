@@ -61,6 +61,10 @@ onMounted(async()=>{try{spec.value=await api('/openapi.json');await nextTick();i
       </tbody></table></div>
       <p>例如办理 Pro 20x，在下单 JSON 中填写 <code>"product_id": "pro20x"</code>；报价查询使用 <code>?product_id=pro20x</code>。</p>
       <p>获取最新列表：携带 API 密钥调用 <code>GET /api/v1/catalog</code>，找到所需套餐的 <code>name</code>，将同一条记录的 <code>id</code> 原样传入。后续新增套餐也使用这一方式。</p>
+      <h3>Team团队订阅的席位与优惠码</h3>
+      <p>当前 Go 提链流程统一使用 <code>product_id: "team"</code>。<code>seats</code> 是普通与高级席位的总数，至少 2、最多 100；<code>premium_seats</code> 是其中的高级席位数。省略时分别为 2 和 0。</p>
+      <div class="docs-table"><table><thead><tr><th>席位组合</th><th>seats</th><th>premium_seats</th></tr></thead><tbody><tr><td>2 普通</td><td>2</td><td>0</td></tr><tr><td>1 普通＋1 高级</td><td>2</td><td>1</td></tr><tr><td>2 高级</td><td>2</td><td>2</td></tr></tbody></table></div>
+      <p>可选 <code>promo_code</code> 填写用户自己的 Team 优惠码，留空则不使用。优惠码只影响上游结账金额，平台服务费仍以报价为准。无需传递团队空间名称 <code>workspace_name</code>。订阅办理和仅生成结账链接均使用这些参数；总席位不足 2 或高级席位超过总数会返回 HTTP 400，且不会受理订单或冻结费用。</p>
     </section>
     <section id="input-sources" class="panel docs-section">
       <h2>字段来源与调用顺序</h2>
