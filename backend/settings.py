@@ -23,6 +23,10 @@ OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_fl
 
 def validate_config(key, v):
     require(key in DEFAULTS, '不支持的配置组')
+    if key == 'custom_menus':
+        from .custom_menus import validate
+        validate(v)
+        return
     if key == 'features':
         require(set(v) == set(DEFAULTS[key]) and all(type(x) is bool for x in v.values()), '功能开关配置无效')
         return

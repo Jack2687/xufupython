@@ -11,6 +11,7 @@ TIERS = [
     {'code':'L9','name':'合作伙伴','threshold':10000000,'discount':20,'description':'服务费减免 80%'},
 ]
 DEFAULTS = {
+    'custom_menus': {'items':[]},
     'features': {name: True for name in ('home','subscribe','orders','wallet','links','renewal','keys','invites','membership','docs')},
     'security': {'registration_open':True,'email_verify_enabled':False,'email_domain_whitelist':[]},
     'mail': {'enabled':False,'host':'','port':465,'username':'','password_enc':'','from_email':'','from_name':'','encryption':'ssl'},

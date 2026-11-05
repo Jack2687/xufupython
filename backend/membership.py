@@ -47,7 +47,11 @@ def fee_source(m,product_id):
 def me(request: Request):
     from .features import project_user, capabilities, navigation
     user=current(request);flags=capabilities(user)
-    return {**project_user(user),'features':flags,'navigation':navigation(user),'membership':membership_for(user['id']) if flags['membership'] else None}
+    result={**project_user(user),'features':flags,'navigation':navigation(user),'membership':membership_for(user['id']) if flags['membership'] else None}
+    if request.url.path=='/api/me':
+        from .custom_menus import visible
+        result['custom_menus']=visible(user)
+    return result
 
 
 @router.get('/membership')
