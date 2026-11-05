@@ -45,9 +45,10 @@ from test_invitations import InvitationTests
 from test_site_security import SiteSecurityTests
 from test_account_deletion import AccountDeletionTests
 from test_custom_menus import CustomMenuTests
+from test_branding import BrandingTests
 
 
-class BackendTests(CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):

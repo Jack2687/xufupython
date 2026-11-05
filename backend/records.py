@@ -8,6 +8,7 @@ from .runtime import order_workflows, queue_message, worker_mode
 from . import payment_trace
 from .features import capabilities, project_user
 from .email_auth import security_config, mail_ready
+from .branding import public_site
 
 public_router=APIRouter(prefix='/api')
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
@@ -70,7 +71,7 @@ def public():
     flow=cfg.get('subscription_flow') or ''
     connected=cfg.get('enabled') is True and flow in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
     flags=capabilities()
-    return {'site':config('site'),'features':flags,'security':dict(security_config(),password_reset_available=mail_ready()),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort') if any(flags[k] for k in ('subscribe','links','membership')) else [],'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected and flags['links'],'payment_connected':connected and flags['subscribe'],'subscription_flow':flow if connected and (flags['subscribe'] or flags['links']) else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers') if flags['membership'] else {}}
+    return {'site':public_site(),'features':flags,'security':dict(security_config(),password_reset_available=mail_ready()),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort') if any(flags[k] for k in ('subscribe','links','membership')) else [],'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected and flags['links'],'payment_connected':connected and flags['subscribe'],'subscription_flow':flow if connected and (flags['subscribe'] or flags['links']) else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers') if flags['membership'] else {}}
 
 
 @router.get('/overview')

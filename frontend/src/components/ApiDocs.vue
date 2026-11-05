@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,ref} from 'vue'
-import {Layers3,ArrowUpRight,Copy,Download,Menu,X} from 'lucide-vue-next'
+import {ArrowUpRight,Copy,Download,Menu,X} from 'lucide-vue-next'
 import {api,copy,action,type Row} from '../lib'
 import {schemaFields,fieldType,fieldRules,requestExamples,codeSample} from '../apiDocs'
+defineProps<{site?:Row}>()
 const spec=ref<Row>({}),error=ref(''),lang=ref('curl'),mobile=ref(false),origin=location.origin
 const selected=ref<Record<string,string>>({})
 const operations=computed(()=>Object.entries(spec.value.paths||{}).flatMap(([path,v])=>Object.entries(v as Row).map(([method,op])=>({path,method,op:op as Row,id:(op as Row).operationId}))))
@@ -20,7 +21,7 @@ onMounted(async()=>{try{spec.value=await api('/openapi.json');await nextTick();i
 <div class="api-docs">
   <button class="docs-menu-toggle icon-btn bordered" @click="mobile=!mobile" aria-label="文档菜单"><Menu :size="20"/></button>
   <aside class="docs-sidebar" :class="{open:mobile}">
-    <a href="/#/home" class="brand"><span class="brand-icon"><Layers3 :size="23"/></span><b>序付<small>DEVELOPERS</small></b></a>
+    <a href="/#/home" class="brand"><span class="brand-icon"><img :src="site?.icon_url||'/site-icon'" alt=""/></span><b>{{site?.name||'序付'}}<small>DEVELOPERS</small></b></a>
     <button class="icon-btn docs-close" @click="mobile=false" aria-label="收起文档菜单"><X/></button>
     <p class="eyebrow">接入指引</p>
     <a href="/docs#start" @click="mobile=false">快速开始</a><a href="/docs#auth" @click="mobile=false">鉴权与数据约定</a>

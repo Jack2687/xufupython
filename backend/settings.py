@@ -18,7 +18,7 @@ RANGES = {
  'proxy': {'request_timeout_seconds':(10,120)}, 'site': {'invite_rate':(0,0)}
 }
 RANGES['payment']['post_payment_delay_seconds'] = (0,MAX_SECONDS)
-OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds','cslive_go_visit_return','cslive_go_refresh_before_renewal'}}
+OPTIONAL = {'site': {'icon'}, 'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds','cslive_go_visit_return','cslive_go_refresh_before_renewal'}}
 
 
 def validate_config(key, v):
@@ -75,6 +75,9 @@ def validate_config(key, v):
         for name in ('default_id','global_id'):
             if name in v: require(0<=length(v[name])<=64,'代理标识无效')
     if key=='site':
+        if 'icon' in v:
+            from .branding import decode_icon
+            decode_icon(v['icon'])
         for name,lo,hi in [('name',1,50),('english_name',1,50),('tagline',1,200),('support_url',0,500),('terms',10,5000)]:
             require(lo<=length(v[name])<=hi,name+' 内容长度无效')
         require(v['billing_country']=='US' and v['billing_mode']=='customer_review','账单配置无效')
@@ -113,6 +116,7 @@ def settings():
     result['payment'].setdefault('post_payment_delay_seconds', DEFAULT_SECONDS)
     for name in ('cslive_go_visit_return','cslive_go_refresh_before_renewal'):
         result['payment'].setdefault(name, True)
+    result['site'].setdefault('icon','')
     result['mail'] = public_mail(result['mail'])
     result['security']['registration_open'] = result['site']['registration_open']
     return result

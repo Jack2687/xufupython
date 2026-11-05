@@ -34,3 +34,5 @@
 @supports not selector(::-webkit-scrollbar){*{scrollbar-width:none!important}}
 /* Chromium supports separate axes only through its scrollbar pseudo element. */
 @supports selector(::-webkit-scrollbar){*{scrollbar-width:auto!important}}
+
+.brand-icon>img{width:100%;height:100%;display:block;object-fit:contain;border-radius:inherit}
