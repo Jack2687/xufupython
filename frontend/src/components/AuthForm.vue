@@ -38,10 +38,10 @@ async function submit(){
   <div class="eyebrow">WELCOME TO {{pub.site.english_name}}</div>
   <h2>{{mode==='register'?'建立你的专属空间':mode==='reset'?'找回你的账户':'欢迎回来'}}</h2>
   <p class="muted">{{mode==='register'?'用一个账户，管理每一次订阅。':mode==='reset'?'验证注册邮箱，设置新的登录密码。':'登录后继续管理你的服务与资金。'}}</p>
-  <div v-if="mode!=='reset'" class="segmented"><button type="button" :class="{active:mode==='login'}" :disabled="busy" @click="mode='login'">登录账户</button><button v-if="policy.registration_open" type="button" :class="{active:mode==='register'}" :disabled="busy" @click="mode='register'">创建账户</button></div>
+  <div v-if="mode!=='reset'" class="segmented"><button type="button" :class="{active:mode==='login'}" :disabled="busy" @click="mode='login'">登录账户</button><button v-if="policy.registration_open" type="button" :class="{active:mode==='register'}" :disabled="busy" @click="mode='register'">注册账户</button></div>
   <button v-else type="button" class="text-btn auth-back" :disabled="busy" @click="mode='login'"><ArrowLeft :size="15"/>返回登录</button>
   <div v-if="error" class="alert danger" role="alert">{{error}}</div><div v-if="message" class="callout" role="status">{{message}}</div>
-  <label v-if="mode==='register'">你的称呼<input v-model="name" required maxlength="80" autocomplete="nickname" placeholder="怎么称呼你"/></label>
+  <label v-if="mode==='register'">用户名<input v-model="name" required maxlength="80" autocomplete="username" placeholder="请输入用户名"/></label>
   <label>{{mode==='login'?'登录账号':'邮箱地址'}}<input v-model="email" :type="mode==='login'?'text':'email'" required maxlength="254" :placeholder="mode==='login'?'用户名或邮箱':'name@example.com'" :autocomplete="mode==='login'?'username':'email'" :disabled="busy||sending"/></label>
   <p v-if="mode==='register'&&policy.email_domain_whitelist?.length" class="muted small">支持的邮箱域名：{{policy.email_domain_whitelist.join('、')}}</p>
   <label v-if="needsCode">邮箱验证码<div class="auth-code"><input v-model="code" required inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" placeholder="6 位验证码"/><button class="btn secondary" type="button" @click="send" :disabled="sending||seconds>0||!email||busy"><LoaderCircle v-if="sending" :size="15" class="spinning"/>{{seconds>0?seconds+' 秒后重发':sending?'发送中…':'获取验证码'}}</button></div><small>验证码 15 分钟有效，请勿分享给他人。</small></label>
@@ -49,7 +49,7 @@ async function submit(){
   <label v-if="mode==='reset'">确认新密码<input v-model="confirm" type="password" required minlength="10" maxlength="72" autocomplete="new-password" placeholder="再输入一次新密码"/></label>
   <label v-if="mode==='register'&&pub.features?.invites!==false">邀请标识（选填）<input v-model="invite" maxlength="80" placeholder="来自伙伴的邀请标识"/></label>
   <div v-if="mode==='login'&&policy.password_reset_available" class="auth-forgot"><button type="button" class="text-btn" @click="mode='reset'">忘记密码？</button></div>
-  <button class="btn primary full" :disabled="busy||sending"><LoaderCircle v-if="busy" class="spinning" :size="18"/>{{busy?'请稍候…':mode==='register'?(needsCode?'验证并创建账户':'创建账户'):mode==='reset'?'重置密码':'进入工作台'}}<ArrowRight v-if="!busy" :size="18"/></button>
+  <button class="btn primary full" :disabled="busy||sending"><LoaderCircle v-if="busy" class="spinning" :size="18"/>{{busy?'请稍候…':mode==='register'?(needsCode?'验证并注册账户':'注册账户'):mode==='reset'?'重置密码':'进入工作台'}}<ArrowRight v-if="!busy" :size="18"/></button>
   <div class="login-hint"><ShieldCheck :size="15"/>{{mode==='reset'?'重置后原登录会话和 API 密钥将失效':'仅在你自己的账户空间查看业务资料'}}</div>
  </form>
 </template>

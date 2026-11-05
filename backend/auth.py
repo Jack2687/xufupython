@@ -22,7 +22,7 @@ async def login(request: Request):
         event(request,'login_rate','high','登录尝试频繁')
         raise BusinessError('登录尝试过多，请一分钟后再试',429)
     v = await body(request)
-    user = db.one('SELECT id,password_hash,status FROM users WHERE email=$1',str(v.get('email','')).strip().lower())
+    user = db.one('SELECT id,password_hash,status FROM users WHERE email=$1 AND deleted_at IS NULL',str(v.get('email','')).strip().lower())
     dummy = '$2b$12$vuCQLWceDWoxSWQG6TLbqep2q5iYtXvwi5ok8gQ9MluCb8FH13H96'
     valid = password_matches(str(v.get('password','')),user['password_hash'] if user else dummy)
     if not user or not valid or user['status'] != 'active':
@@ -47,11 +47,11 @@ async def register(request: Request):
     require(limit('register:'+ip(request),5),'请稍后再试',429)
     v = await body(request)
     email = str(v.get('email','')).strip().lower(); name=v.get('name',''); pw=v.get('password','')
-    require(email_valid(email) and isinstance(name,str) and 1 <= length(name.strip()) <= 80 and 10 <= length(pw) <= 72,'请填写有效邮箱、称呼和 10～72 位密码')
+    require(email_valid(email) and isinstance(name,str) and 1 <= length(name.strip()) <= 80 and 10 <= length(pw) <= 72,'请填写有效邮箱、用户名和 10～72 位密码')
     require(email_allowed(email,cfg), '此邮箱域名暂不支持注册')
     inviter = None
     if v.get('invite'):
-        inviter = db.scalar('SELECT id FROM users WHERE invite_code=$1',v['invite'])
+        inviter = db.scalar('SELECT id FROM users WHERE invite_code=$1 AND deleted_at IS NULL',v['invite'])
         require(inviter is not None,'邀请标识无效')
     user_id=uid()
     from psycopg2.errors import UniqueViolation
@@ -81,7 +81,7 @@ async def reset_password(request: Request):
     require(email_valid(email) and 10 <= length(pw) <= 72, '请填写有效邮箱和 10～72 位新密码')
     hashed=password_hash(pw)
     with db.transaction() as q:
-        user=q.one('SELECT id,status,password_hash FROM users WHERE email=$1 FOR UPDATE',email)
+        user=q.one('SELECT id,status,password_hash FROM users WHERE email=$1 AND deleted_at IS NULL FOR UPDATE',email)
         error=consume(q,email,'reset',v.get('code'),user)
         if not error:
             q.execute('UPDATE users SET password_hash=$2,updated_at=now() WHERE id=$1',user['id'],hashed)

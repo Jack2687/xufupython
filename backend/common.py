@@ -135,13 +135,13 @@ def authenticate(request: Request, admin=False, apply_limit=True):
     if authorization:
         require(not admin and request.url.path.startswith('/api/v1/'), '此接口不接受 API 密钥', 403)
         token = authorization.removeprefix('Bearer ')
-        user = db.one('SELECT '+USER_FIELDS+' FROM users u JOIN api_keys k ON k.user_id=u.id WHERE k.hash=$1 AND NOT k.revoked', digest(token))
+        user = db.one('SELECT '+USER_FIELDS+' FROM users u JOIN api_keys k ON k.user_id=u.id WHERE k.hash=$1 AND NOT k.revoked AND u.deleted_at IS NULL', digest(token))
         if user:
             db.execute('UPDATE api_keys SET last_used=now() WHERE hash=$1', digest(token))
     else:
         token = request.cookies.get('xupay_session')
         require(bool(token), '请先登录', 401)
-        user = db.one('SELECT '+USER_FIELDS+' FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.hash=$1 AND s.expires_at>now()', digest(token))
+        user = db.one('SELECT '+USER_FIELDS+' FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.hash=$1 AND s.expires_at>now() AND u.deleted_at IS NULL', digest(token))
     require(user is not None and user['status'] == 'active', '登录已失效或账户已停用', 401)
     request.state.user = user
     if admin and user['role'] != 'admin':

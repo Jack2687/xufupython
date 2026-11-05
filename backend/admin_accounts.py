@@ -9,9 +9,41 @@ from .product_ids import internal_id
 router=APIRouter(prefix='/api/admin',dependencies=[Depends(administrator)])
 
 
+def delete_accounts(request, ids):
+    require(isinstance(ids,list) and 1<=len(ids)<=500 and all(isinstance(x,str) and 1<=len(x)<=80 for x in ids),'请选择 1～500 个账户')
+    ids=sorted(set(ids));deleted=[];skipped=[]
+    with db.transaction() as q:
+        q.execute('SELECT pg_advisory_xact_lock(1886001)')
+        rows=q.all('SELECT id,email,role,status,deleted_at FROM users WHERE id=ANY($1) ORDER BY id FOR UPDATE',ids)
+        admins=q.scalar("SELECT count(*) FROM users WHERE role='admin' AND status='active' AND deleted_at IS NULL")
+        for row in rows:
+            if row['deleted_at'] is not None:continue
+            reason='不能删除当前登录的管理员' if row['id']==current(request)['id'] else '至少保留一个可用管理员' if row['role']=='admin' and row['status']=='active' and admins<=1 else ''
+            if reason:
+                skipped.append({'id':row['id'],'email':row['email'],'reason':reason});continue
+            q.execute("UPDATE users SET deleted_at=now(),status='disabled',password_hash='',updated_at=now() WHERE id=$1",row['id'])
+            q.execute('DELETE FROM sessions WHERE user_id=$1',row['id'])
+            q.execute('UPDATE api_keys SET revoked=true WHERE user_id=$1',row['id'])
+            q.execute('DELETE FROM email_challenges WHERE email=$1 OR user_id=$2',row['email'],row['id'])
+            audit(q,request,'user.deleted',row['id'],'删除账户 '+row['email']+'；保留历史订单、资金及已受理任务')
+            deleted.append(row['id'])
+            if row['role']=='admin' and row['status']=='active':admins-=1
+    return {'ok':True,'deleted':len(deleted),'deleted_ids':deleted,'skipped':skipped}
+
+
+@router.post('/users/batch-delete')
+async def batch_delete_users(request:Request):
+    return delete_accounts(request,(await body(request)).get('ids'))
+
+
+@router.delete('/users/{id}')
+def delete_user(id:str,request:Request):
+    return delete_accounts(request,[id])
+
+
 @router.get('/users')
 def users(q: str=''):
-    rows=db.all("SELECT u.id,u.email,u.name,u.role,u.status,u.balance,u.frozen,u.fee_override,u.membership_code,u.membership_until,u.invite_code,u.created_at,(SELECT count(*) FROM orders o WHERE o.user_id=u.id AND o.deleted_at IS NULL) AS orders,COALESCE(s.spent,0)::bigint AS spent FROM users u LEFT JOIN (SELECT user_id,sum(spent) AS spent FROM ("+SPEND+") s GROUP BY user_id) s ON s.user_id=u.id WHERE ($1='' OR u.email ILIKE '%'||$1||'%' OR u.name ILIKE '%'||$1||'%') ORDER BY u.created_at DESC LIMIT 500",q)
+    rows=db.all("SELECT u.id,u.email,u.name,u.role,u.status,u.balance,u.frozen,u.fee_override,u.membership_code,u.membership_until,u.invite_code,u.created_at,(SELECT count(*) FROM orders o WHERE o.user_id=u.id AND o.deleted_at IS NULL) AS orders,COALESCE(s.spent,0)::bigint AS spent FROM users u LEFT JOIN (SELECT user_id,sum(spent) AS spent FROM ("+SPEND+") s GROUP BY user_id) s ON s.user_id=u.id WHERE u.deleted_at IS NULL AND ($1='' OR u.email ILIKE '%'||$1||'%' OR u.name ILIKE '%'||$1||'%') ORDER BY u.created_at DESC LIMIT 500",q)
     prices={}
     for row in db.all('SELECT user_id,product_id,fee FROM user_product_prices'):
         prices.setdefault(row['user_id'],{})[row['product_id']]=row['fee']
@@ -68,10 +100,10 @@ async def update_user(id: str,request: Request):
     try:
         with db.transaction() as q:
             q.execute('SELECT pg_advisory_xact_lock(1886001)')
-            old=q.one('SELECT role,status FROM users WHERE id=$1 FOR UPDATE',id)
+            old=q.one('SELECT role,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',id)
             require(old is not None,'用户不存在')
             if old['role']=='admin' and old['status']=='active' and (role!='admin' or status!='active'):
-                require(q.scalar("SELECT count(*) FROM users WHERE role='admin' AND status='active'")>1,'至少保留一个可用管理员')
+                require(q.scalar("SELECT count(*) FROM users WHERE role='admin' AND status='active' AND deleted_at IS NULL")>1,'至少保留一个可用管理员')
             q.execute('UPDATE users SET email=$2,name=$3,role=$4,status=$5,fee_override=$6,updated_at=now() WHERE id=$1',id,email,name,role,status,fee)
             account_options(q,request,id,v)
             if pw:q.execute('UPDATE users SET password_hash=$2 WHERE id=$1',id,password_hash(pw))
@@ -89,7 +121,7 @@ async def pricing(request: Request):
     require(isinstance(ids,list) and 1<=len(ids)<=500 and all(isinstance(x,str) for x in ids),'请选择账号并输入有效单价')
     if fee is not None:integer(fee,0,100000000)
     with db.transaction() as q:
-        n=q.execute('UPDATE users SET fee_override=$2,updated_at=now() WHERE id=ANY($1)',sorted(ids),fee)
+        n=q.execute('UPDATE users SET fee_override=$2,updated_at=now() WHERE id=ANY($1) AND deleted_at IS NULL',sorted(ids),fee)
         audit(q,request,'user.pricing','batch',f'批量调整 {n} 个账户单价')
     return {'updated':n}
 
@@ -101,6 +133,7 @@ async def adjust_balance(id: str,request: Request):
     require(amount!=0 and 2<=length(reason)<=300 and 8<=len(key)<=120,'需要非零金额、调整原因和请求标识')
     rh=digest(json.dumps([id,amount,reason],ensure_ascii=False));lock=current(request)['id']+':'+key
     with db.transaction() as q:
+        require(q.scalar('SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',id),'账户不存在',404)
         q.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',lock)
         prior=q.one('SELECT request_hash FROM mutation_keys WHERE key=$1',lock)
         if prior:
@@ -114,7 +147,7 @@ async def adjust_balance(id: str,request: Request):
 
 @router.get('/membership')
 def members():
-    rows=db.all('SELECT u.id,u.email,u.name,u.role,u.status,u.fee_override,u.membership_code,u.membership_until,COALESCE(s.spent,0)::bigint AS spent FROM users u LEFT JOIN (SELECT user_id,sum(spent)::bigint AS spent FROM ('+SPEND+') s GROUP BY user_id) s ON s.user_id=u.id ORDER BY u.created_at DESC')
+    rows=db.all('SELECT u.id,u.email,u.name,u.role,u.status,u.fee_override,u.membership_code,u.membership_until,COALESCE(s.spent,0)::bigint AS spent FROM users u LEFT JOIN (SELECT user_id,sum(spent)::bigint AS spent FROM ('+SPEND+') s GROUP BY user_id) s ON s.user_id=u.id WHERE u.deleted_at IS NULL ORDER BY u.created_at DESC')
     distribution={};total=0
     for u in rows:
         m=membership_from(u,u['spent']);u['membership']=m
@@ -132,7 +165,7 @@ async def set_membership(id: str,request: Request):
         q.execute('SELECT pg_advisory_xact_lock(782518860)')
         require(code=='' or any(t['code']==code for t in config('tiers',q)['items']),'等级不存在')
         if not code:until=None
-        require(q.execute('UPDATE users SET membership_code=$2,membership_until=$3,updated_at=now() WHERE id=$1',id,code,until)==1,'账户不存在',404)
+        require(q.execute('UPDATE users SET membership_code=$2,membership_until=$3,updated_at=now() WHERE id=$1 AND deleted_at IS NULL',id,code,until)==1,'账户不存在',404)
         audit(q,request,'membership.adjusted',id,json.dumps({'code':code,'until':until.isoformat() if until else None,'reason':reason},ensure_ascii=False))
     return {'ok':True}
 

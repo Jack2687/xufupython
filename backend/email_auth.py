@@ -149,7 +149,7 @@ async def send_code(request: Request, background: BackgroundTasks):
         previous = q.one('SELECT created_at FROM email_challenges WHERE email=$1 AND purpose=$2', email, purpose)
         require(not previous or (now() - previous['created_at']).total_seconds() >= 60, '请在 60 秒后重新获取验证码', 429)
         require(daily_limit('email-day-recipient:' + digest(email), 20), '此邮箱今日发送次数已达上限，请明天再试', 429)
-        user = q.one('SELECT id,password_hash,status FROM users WHERE email=$1', email)
+        user = q.one('SELECT id,password_hash,status FROM users WHERE email=$1 AND deleted_at IS NULL', email)
         eligible = not user if purpose == 'register' else bool(user and user['status'] == 'active')
         q.execute("INSERT INTO email_challenges(email,purpose,secret_hash,user_id,credential_hash,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '15 minutes') ON CONFLICT(email,purpose) DO UPDATE SET secret_hash=EXCLUDED.secret_hash,user_id=EXCLUDED.user_id,credential_hash=EXCLUDED.credential_hash,expires_at=EXCLUDED.expires_at,created_at=now(),attempts=0,delivered=false",
                   email, purpose, fingerprint, user['id'] if user else None, digest(user['password_hash']) if user else '')

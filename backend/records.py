@@ -179,7 +179,7 @@ def catalog(request:Request):
 
 @admin_router.get('/overview')
 def admin_overview():
-    stats=db.one("SELECT (SELECT count(*) FROM users WHERE role='member') AS customers,(SELECT COALESCE(sum(balance),0) FROM users WHERE role='member') AS balance,(SELECT COALESCE(sum(frozen),0) FROM users WHERE role='member') AS frozen,(SELECT count(*) FROM orders WHERE deleted_at IS NULL) AS orders,(SELECT count(*) FROM topups WHERE status='pending') AS pending_topups,(SELECT count(*) FROM risk_events WHERE NOT resolved) AS risks,(SELECT count(*) FROM resources WHERE enabled) AS resources,(SELECT count(*) FROM orders WHERE deleted_at IS NULL AND status IN ('queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS active_orders")
+    stats=db.one("SELECT (SELECT count(*) FROM users WHERE role='member' AND deleted_at IS NULL) AS customers,(SELECT COALESCE(sum(balance),0) FROM users WHERE role='member') AS balance,(SELECT COALESCE(sum(frozen),0) FROM users WHERE role='member') AS frozen,(SELECT count(*) FROM orders WHERE deleted_at IS NULL) AS orders,(SELECT count(*) FROM topups WHERE status='pending') AS pending_topups,(SELECT count(*) FROM risk_events WHERE NOT resolved) AS risks,(SELECT count(*) FROM resources WHERE enabled) AS resources,(SELECT count(*) FROM orders WHERE deleted_at IS NULL AND status IN ('queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS active_orders")
     scheduler=dict(config('scheduler'),worker_mode=worker_mode())
     scheduler['paused']=scheduler['paused'] or worker_mode()=='off'
     cfg=config('payment')
