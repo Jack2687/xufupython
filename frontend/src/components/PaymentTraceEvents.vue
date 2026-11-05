@@ -26,7 +26,9 @@ Object.assign(diagnosticValues,{system_billing:'系统账单资料',subscription
 Object.assign(requestLabels,{merchant_return:'访问付款回跳页',renewal_read:'查询自动续费状态'})
 Object.assign(diagnosticLabels,{response_content_type:'响应内容类型',response_error_code:'响应错误码',response_error_type:'响应错误类型',response_message:'错误说明（已脱敏）',response_detail:'错误详情（已脱敏）',response_title:'响应页面标题',response_summary:'响应摘要（已脱敏）',response_truncated:'响应超出记录上限',cf_ray:'网关请求编号',response_request_id:'上游请求编号',retrying:'将重试此查询',retry_wait_ms:'计划重试间隔',retry_wait_elapsed_ms:'实际等待时间'})
 Object.assign(diagnosticLabels,{retry_number:'本单重试次数',retry_limit:'最大重试次数',retry_delay_seconds:'重试间隔（秒）',checkout_reused:'复用原结账链接'})
-const diagnosticText=(key:string,value:unknown)=>typeof value==='boolean'?(value?'是':'否'):key.endsWith('_ms')?`${value} 毫秒`:diagnosticValues[String(value)]||String(value)
+Object.assign(diagnosticLabels,{checkout_exit_code:'提链进程退出码'})
+Object.assign(diagnosticValues,{go_checkout:'Go 提链程序'})
+const diagnosticText=(key:string,value:unknown)=>key==='response_error_code'?String(value):typeof value==='boolean'?(value?'是':'否'):key.endsWith('_ms')?`${value} 毫秒`:diagnosticValues[String(value)]||String(value)
 const duration=(v:unknown)=>Number(v)>=1000?`${(Number(v)/1000).toFixed(1)} 秒`:`${Number(v)||0} 毫秒`
 </script>
 <template>

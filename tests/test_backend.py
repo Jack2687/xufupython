@@ -46,9 +46,10 @@ from test_site_security import SiteSecurityTests
 from test_account_deletion import AccountDeletionTests
 from test_custom_menus import CustomMenuTests
 from test_branding import BrandingTests
+from test_checkout_diagnostics import CheckoutDiagnosticTests
 
 
-class BackendTests(BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -527,7 +528,7 @@ class BackendTests(BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecuri
             db.execute("UPDATE settings SET value=$1 WHERE key='billing'",dict(settings['billing'],address_templates=[profile]))
             db.execute('UPDATE users SET balance=1000000 WHERE id=$1',user_id)
             product=db.scalar('SELECT id FROM products WHERE enabled ORDER BY sort LIMIT 1')
-            path='/api/orders'
+            path=module.router.prefix+'/orders'
             payload={'workflow':workflow,'product_id':product,'session':self.fake_session(refresh=True),'accepted':True,
                      'card':{'number':'4242424242424242','month':'12','year':'2030','cvc':'123'}}
             order=self.ok(user.post(path,json=payload,headers={'Idempotency-Key':uid()}))['id']

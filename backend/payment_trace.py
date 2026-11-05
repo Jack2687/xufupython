@@ -9,6 +9,7 @@ import time
 from urllib.parse import urlsplit
 
 from . import db, http_evidence
+from .checkout_errors import CheckoutError
 
 log = logging.getLogger('xufu.payment_trace')
 _current = ContextVar('payment_trace', default=None)
@@ -65,6 +66,11 @@ CODES = {
     'checkpoint_failed': '收尾进度保存失败，已停止后续操作',
     'invalid_json_response': '上游未返回有效 JSON，请结合 HTTP 状态查看响应摘要',
     'network_timeout': '付款后网络请求超时',
+    'checkout_failed': '提链失败，请查看原始错误码',
+    'checkout_existing_subscription': '账号已有订阅，无法继续提链',
+    'checkout_account_unavailable': '账号不存在或不符合套餐要求',
+    'checkout_verification_failed': '提链验证未通过，请查看原始错误码',
+    'checkout_program_unavailable': '提链程序不可用，请检查部署',
 }
 REQUEST_PHASES = {
     'exit_probe': 'network', 'direct_exit_probe': 'network', 'checkout_create': 'checkout', 'checkout_initialize': 'opening',
@@ -86,6 +92,8 @@ _dropped = 0
 
 
 def error_code(exc):
+    if isinstance(exc, CheckoutError):
+        return exc.category
     # Error text is used only to select a fixed category; it is never persisted.
     followup = getattr(exc, 'post_payment_code', None)
     if followup in CODES:
@@ -124,6 +132,8 @@ def _diagnostics(values):
         if key in _DIAGNOSTIC_ENUMS and isinstance(value, str) and value in _DIAGNOSTIC_ENUMS[key]:
             result[key] = value
         elif key == 'request_attempt' and type(value) is int and 1 <= value <= 10000:
+            result[key] = value
+        elif key == 'checkout_exit_code' and type(value) is int and -65535 <= value <= 65535:
             result[key] = value
         elif key in {'retry_number', 'retry_limit'} and type(value) is int and 0 <= value <= 5:
             result[key] = value
@@ -260,6 +270,14 @@ def request(kind):
     try:
         yield observation
     except Exception as exc:
+        if isinstance(exc, CheckoutError):
+            observation.diagnostics.update(response_error_code=exc.code, response_error_type='go_checkout')
+            if exc.exit_code is not None:
+                observation.diagnostics['checkout_exit_code'] = exc.exit_code
+            if re.fullmatch(r'http_[1-5]\d\d', exc.code):
+                observation.status = int(exc.code[5:])
+            log.warning('[%s] checkout failure: code=%s category=%s exit=%s',
+                        ctx['order_id'], exc.code, exc.category, exc.exit_code)
         observation.code = observation.code or error_code(exc)
         raise
     finally:

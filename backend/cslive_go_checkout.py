@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from . import payment_trace as trace
+from .checkout_errors import CheckoutError
 
 log = logging.getLogger('xufu.cslive_go_checkout')
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,12 +31,6 @@ PLAN_MAP = {
     'go': 'go',
     'promax': 'promax',
 }
-
-
-class CheckoutError(Exception):
-    def __init__(self, code: str, message: str = ''):
-        super().__init__(message or code)
-        self.code = code
 
 
 def binary_path() -> Path:
@@ -118,13 +113,12 @@ def create_checkout(
     也避开只读文件系统。
     """
     executable = binary_path()
-    if not executable.is_file():
-        raise CheckoutError('go_followup_unavailable',
-                            'cs-live 提链程序未就绪，请放入 cs-live-source/ 并构建')
     canonical = _normalize_plan(plan)
     is_team = canonical in ('team', 'team5x')
     session_json = _build_session_json(session)
     with trace.request('checkout_create') as diagnostic:
+        if not executable.is_file():
+            raise CheckoutError('checkout_program_unavailable')
         args = [
             str(executable), 'create-checkout',
             '--country', country.upper(),
@@ -159,23 +153,23 @@ def create_checkout(
                 timeout=timeout_sec,
                 creationflags=flags,
             )
-        except subprocess.TimeoutExpired as exc:
-            diagnostic.response(0)
-            raise CheckoutError('timeout', '提链超时') from exc
-        except OSError as exc:
-            diagnostic.response(0)
-            raise CheckoutError('connection', '提链进程无法启动') from exc
+        except subprocess.TimeoutExpired:
+            raise CheckoutError('timeout') from None
+        except OSError:
+            raise CheckoutError('checkout_program_unavailable') from None
         stdout = completed.stdout.decode('utf-8', errors='replace')
-        parsed = _parse_output(stdout)
+        try:
+            parsed = _parse_output(stdout)
+        except CheckoutError as exc:
+            raise CheckoutError(exc.code, exit_code=completed.returncode) from None
         if not isinstance(parsed, dict):
-            raise CheckoutError('invalid_response', 'cs_live 返回结构无效')
-        err = str(parsed.get('error_code') or parsed.get('error') or '').strip()
+            raise CheckoutError('invalid_response', exit_code=completed.returncode)
+        err = parsed.get('error_code') or parsed.get('error') or ''
         exit_code = completed.returncode
         hosted_url = str(parsed.get('checkout_url') or parsed.get('hostedUrl') or '').strip()
         cs_id = str(parsed.get('checkout_id') or parsed.get('checkoutSessionId') or '').strip()
         if exit_code != 0 or err or not hosted_url or not cs_id:
-            diagnostic.response(0)
-            raise CheckoutError(err or 'checkout_failed', err or '提链失败')
+            raise CheckoutError(err or 'checkout_failed', exit_code=exit_code)
         diagnostic.response(200)
         return {
             'ok': True,
