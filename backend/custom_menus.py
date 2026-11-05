@@ -52,9 +52,9 @@ def validate(value):
 
 
 def visible(user):
-    role='admin' if user.get('role')=='admin' else 'user'
+    roles=('user','admin','all') if user.get('role')=='admin' else ('user','all')
     return [{k:v for k,v in item.items() if k not in ('visibility','enabled')} for item in config('custom_menus').get('items',[])
-            if item.get('enabled') is True and item.get('visibility') in (role,'all')]
+            if item.get('enabled') is True and item.get('visibility') in roles]
 
 
 @router.get('/custom-pages/{id}')

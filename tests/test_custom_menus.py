@@ -25,12 +25,14 @@ class CustomMenuTests:
             self.ok(self.client.put('/api/admin/settings/custom_menus',json={'items':items}))
             member=self.ok(user.get('/api/me'));admin=self.ok(self.client.get('/api/me'))
             self.assertEqual([m['id'] for m in member['custom_menus']],['member','both'])
-            self.assertEqual([m['id'] for m in admin['custom_menus']],['admin','both'])
+            self.assertEqual([m['id'] for m in admin['custom_menus']],['member','admin','both'])
             self.assertNotIn('private.example.test',json.dumps(member))
             self.assertNotIn('custom_menus',self.ok(anonymous.get('/api/public')))
             for id in ('admin','disabled','missing'):
                 self.assertEqual(user.get('/api/custom-pages/'+id).status_code,404)
             self.ok(user.get('/api/custom-pages/member'));self.ok(self.client.get('/api/custom-pages/admin'))
+            self.ok(self.client.get('/api/custom-pages/member'))
+            self.assertEqual(self.client.get('/api/custom-pages/disabled').status_code,404)
             self.assertEqual(anonymous.get('/api/custom-pages/member').status_code,401)
             self.assertEqual(user.put('/api/admin/settings/custom_menus',json={'items':[]}).status_code,403)
 
