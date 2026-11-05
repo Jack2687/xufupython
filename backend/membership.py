@@ -45,7 +45,9 @@ def fee_source(m,product_id):
 
 @router.get('/me')
 def me(request: Request):
-    return {**current(request),'membership':membership_for(current(request)['id'])}
+    from .features import project_user, capabilities, navigation
+    user=current(request);flags=capabilities(user)
+    return {**project_user(user),'features':flags,'navigation':navigation(user),'membership':membership_for(user['id']) if flags['membership'] else None}
 
 
 @router.get('/membership')
@@ -63,6 +65,7 @@ def membership(request: Request):
 @router.get('/quote')
 @router.get('/v1/quote')
 def quote(request: Request,product_id:str=''):
+    from .features import allowed
     if request.url.path.startswith('/api/v1/'):product_id=internal_id(product_id)
     with db.transaction() as q:
         product=q.one('SELECT fee FROM products WHERE id=$1 AND enabled',product_id)
@@ -70,4 +73,4 @@ def quote(request: Request,product_id:str=''):
         m=membership_for(current(request)['id'],q)
         payment=config('payment',q)
         connected=payment.get('enabled') is True and payment.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
-        return {'fee':fee_for(m,product['fee'],product_id),'standard':product['fee'],'membership':m,'payment_connected':connected,'price_source':fee_source(m,product_id)}
+        return {'fee':fee_for(m,product['fee'],product_id),'standard':product['fee'],'membership':m if allowed('membership',current(request)) else None,'payment_connected':connected and allowed('subscribe',current(request)),'price_source':fee_source(m,product_id)}

@@ -14,7 +14,7 @@ from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
-from . import customer_api, admin_orders, order_updates, invitations
+from . import customer_api, admin_orders, order_updates, invitations, email_auth, features
 from .request_origin import configured_origin, origin_allowed
 
 PUBLIC_ORIGIN = configured_origin(os.getenv('PUBLIC_ORIGIN', ''))
@@ -37,6 +37,9 @@ def maintenance():
             q.execute('DELETE FROM '+table+' WHERE expires_at<now()')
         q.execute("DELETE FROM risk_events WHERE resolved AND created_at<now()-$1*interval '1 day'",config('risk',q)['event_retention_days'])
         q.execute("UPDATE renewal_tasks SET credentials_enc='' WHERE credentials_expires_at<now() AND credentials_enc<>''")
+        q.execute('DELETE FROM email_challenges WHERE expires_at<now()')
+        q.execute("DELETE FROM mail_deliveries WHERE created_at<now()-interval '90 days'")
+        q.execute("UPDATE mail_deliveries SET status='failed',detail='发送未完成，请重新获取验证码',completed_at=now() WHERE status='pending' AND created_at<now()-interval '5 minutes'")
 
 
 def worker_loop(stop):
@@ -120,7 +123,7 @@ async def security(request:Request,call_next):
     return result
 
 
-for module in (auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)
+for module in (auth,email_auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)
 for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router,order_updates.router,invitations.router):app.include_router(router)
 
 
@@ -135,7 +138,8 @@ def ready():
 
 
 @app.get('/api/openapi.json')
-def openapi_document():
+def openapi_document(request:Request):
+    if not features.allowed('docs'): authenticate(request,True)
     return FileResponse(db.ROOT/'backend/openapi.json',media_type='application/json')
 
 
@@ -143,10 +147,12 @@ def openapi_document():
 def static(path:str,request:Request):
     if path=='api' or path.startswith('api/'):return response({'error':'接口不存在'},404)
     if request.method not in ('GET','HEAD'):return response({'error':'请求方法不支持'},405)
+    if path=='docs' and not features.allowed('docs'): authenticate(request,True)
+    if path=='admin' or path.startswith('admin/'): authenticate(request,True)
     target=(WEB/path).resolve()
     require(target.is_relative_to(WEB.resolve()),'文件不存在',404)
     if target.is_file():
-        if target.name.startswith('Admin-') and target.suffix=='.js':authenticate(request,True)
+        if target.name.startswith('Admin') and target.suffix in ('.js','.css'):authenticate(request,True)
         return FileResponse(target)
     if '.' in Path(path).name:return response({'error':'文件不存在'},404)
     return FileResponse(WEB/'index.html')

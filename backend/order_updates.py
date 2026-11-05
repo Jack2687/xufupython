@@ -63,7 +63,10 @@ updates = OrderUpdates()
 
 
 def visible(event, user):
-    return event.get('resync') or user['role'] == 'admin' or event.get('user_id') == user['id']
+    from .features import capabilities
+    if user['role']=='admin': return True
+    flags=capabilities(user)
+    return flags['orders'] and (event.get('resync') or event.get('user_id') == user['id'])
 
 
 @router.get('/order-updates')

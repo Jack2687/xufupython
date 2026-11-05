@@ -2,6 +2,7 @@ import secrets
 from fastapi import APIRouter, Depends, Request
 from . import db
 from .common import *
+from .email_auth import security_config, email_allowed, consume
 
 router = APIRouter(prefix='/api')
 
@@ -41,22 +42,54 @@ def logout(request: Request):
 
 @router.post('/auth/register')
 async def register(request: Request):
-    require(config('site').get('registration_open') is True,'暂未开放注册',403)
+    cfg = security_config()
+    require(cfg['registration_open'],'暂未开放注册',403)
     require(limit('register:'+ip(request),5),'请稍后再试',429)
     v = await body(request)
     email = str(v.get('email','')).strip().lower(); name=v.get('name',''); pw=v.get('password','')
     require(email_valid(email) and isinstance(name,str) and 1 <= length(name.strip()) <= 80 and 10 <= length(pw) <= 72,'请填写有效邮箱、称呼和 10～72 位密码')
+    require(email_allowed(email,cfg), '此邮箱域名暂不支持注册')
     inviter = None
     if v.get('invite'):
         inviter = db.scalar('SELECT id FROM users WHERE invite_code=$1',v['invite'])
         require(inviter is not None,'邀请标识无效')
     user_id=uid()
     from psycopg2.errors import UniqueViolation
+    error = ''
+    hashed = password_hash(pw)
     try:
-        db.execute('INSERT INTO users(id,email,name,password_hash,invite_code,invited_by) VALUES($1,$2,$3,$4,$5,$6)',user_id,email,name,password_hash(pw),uid()[:10],inviter)
+        with db.transaction() as q:
+            q.execute('SELECT pg_advisory_xact_lock(1886031)')
+            cfg = security_config(q)
+            require(cfg['registration_open'], '暂未开放注册', 403)
+            require(email_allowed(email,cfg), '此邮箱域名暂不支持注册')
+            if cfg.get('email_verify_enabled'):
+                error = consume(q,email,'register',v.get('code'))
+            if not error:
+                q.execute('INSERT INTO users(id,email,name,password_hash,invite_code,invited_by) VALUES($1,$2,$3,$4,$5,$6)',user_id,email,name.strip(),hashed,uid()[:10],inviter)
     except UniqueViolation:
         raise BusinessError('该邮箱已注册或暂不可用',409)
+    require(not error, error)
     return create_session(user_id)
+
+
+@router.post('/auth/reset-password')
+async def reset_password(request: Request):
+    require(limit('password-reset:'+ip(request),10), '尝试过于频繁，请稍后再试',429)
+    v=await body(request)
+    email=str(v.get('email','')).strip().lower();pw=v.get('password','')
+    require(email_valid(email) and 10 <= length(pw) <= 72, '请填写有效邮箱和 10～72 位新密码')
+    hashed=password_hash(pw)
+    with db.transaction() as q:
+        user=q.one('SELECT id,status,password_hash FROM users WHERE email=$1 FOR UPDATE',email)
+        error=consume(q,email,'reset',v.get('code'),user)
+        if not error:
+            q.execute('UPDATE users SET password_hash=$2,updated_at=now() WHERE id=$1',user['id'],hashed)
+            q.execute('DELETE FROM sessions WHERE user_id=$1',user['id'])
+            q.execute('UPDATE api_keys SET revoked=true WHERE user_id=$1',user['id'])
+            q.execute("INSERT INTO audit_events(actor_id,action,target,detail,ip) VALUES($1,'password.reset',$1,'通过邮箱重置密码并撤销登录会话和 API 密钥',$2)",user['id'],ip(request))
+    require(not error,error)
+    return {'ok':True,'message':'密码已重置，请使用新密码登录。原登录会话和 API 密钥已失效。'}
 
 
 @router.patch('/me',dependencies=[Depends(member)])

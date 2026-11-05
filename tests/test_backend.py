@@ -42,9 +42,10 @@ from test_admin_order_pricing import AdminOrderPricingTests
 from test_payment_delay_settings import PaymentDelaySettingsTests
 from test_experience import ExperienceTests
 from test_invitations import InvitationTests
+from test_site_security import SiteSecurityTests
 
 
-class BackendTests(InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):

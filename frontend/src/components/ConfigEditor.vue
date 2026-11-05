@@ -18,7 +18,7 @@ const fields:Record<string,Row[]>={
  proxy:[{k:'request_timeout_seconds',n:'每次上游请求超时（秒）',min:10,max:120}],
  risk:[{k:'login_per_minute',n:'每 IP 每分钟登录次数',min:1,max:100},{k:'api_per_minute',n:'每账号每分钟接口请求',min:10,max:10000},{k:'order_per_minute',n:'每账号每分钟创建订单',min:1,max:100},{k:'max_open_orders',n:'每账号未完成订单上限',min:1,max:500},{k:'max_topup',n:'单笔充值上限（积分）',min:1,max:1000000,money:true},{k:'session_hours',n:'登录有效期（小时）',min:1,max:168},{k:'event_retention_days',n:'风控事件保留天数',min:7,max:365}],
  scheduler:[{k:'paused',n:'暂停队列领取',type:'switch'},{k:'max_parallel',n:'全局最大并发',min:1,max:100},{k:'per_user_parallel',n:'单账号最大并发',min:1,max:20},{k:'retry_limit',n:'安全失败最大重试次数',min:0,max:10},{k:'retry_delay_seconds',n:'重试间隔（秒）',min:5,max:3600},{k:'task_timeout_seconds',n:'任务超时（秒）',min:30,max:1800},{k:'queue_limit',n:'等待队列上限',min:1,max:10000},{k:'default_country',n:'默认订阅地区',type:'select',options:subscriptionRegions.map(r=>r.code)}],
- site:[{k:'name',n:'中文品牌',type:'text'},{k:'english_name',n:'英文名称',type:'text'},{k:'tagline',n:'品牌说明',type:'text'},{k:'registration_open',n:'开放自主注册',type:'switch'},{k:'support_url',n:'客服链接（http / https）',type:'text'},{k:'terms',n:'服务约定',type:'textarea'}],
+ site:[{k:'name',n:'中文品牌',type:'text'},{k:'english_name',n:'英文名称',type:'text'},{k:'tagline',n:'品牌说明',type:'text'},{k:'support_url',n:'客服链接（http / https）',type:'text'},{k:'terms',n:'服务约定',type:'textarea'}],
  billing:[{k:'country',n:'默认付款账单国家',type:'fixed'}]
 }
 for(const f of fields[props.group]||[])if(f.money)form.value[f.k]/=100

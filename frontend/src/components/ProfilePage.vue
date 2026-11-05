@@ -5,8 +5,10 @@ import {api,action,cash,date,labels,orderLabel,orderTone,renewalAttention,copy,n
 import {useOrderUpdates,serialRefresh} from '../orderUpdates'
 import DataTable from './DataTable.vue'
 import Modal from './Modal.vue'
+import {featureAllowed} from '../featureAccess'
 
 const props=defineProps<{user:Row}>()
+const enabled=(name:string)=>featureAllowed(props.user.features,name)
 const emit=defineEmits<{refresh:[];logout:[];order:[Row]}>()
 const summary=ref<Row>({}),membership=ref<Row|null>(null),orders=ref<Row[]>([]),loading=ref(false),loaded=ref(false),error=ref('')
 const tab=ref('all'),product=ref(''),modal=ref(''),busy=ref(false),formError=ref(''),name=ref(''),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref('')
@@ -19,14 +21,14 @@ const metrics=computed(()=>[
  {key:'succeeded',name:'已完成办理',value:summary.value.succeeded,unit:'笔',icon:Check,note:'已确认完成的服务'},
  {key:'pending',name:'待完成订单',value:summary.value.pending,unit:'笔',icon:Clock3,note:'草稿、排队及办理中的方案'},
  {key:'used',name:'累计服务消费',value:cash(summary.value.used),unit:'积分',icon:TrendingUp,note:'按实际服务扣费统计'}
-])
+].filter(m=>enabled('home')&&enabled(m.key==='used'?'wallet':'orders')))
 let controller:AbortController|undefined
 async function load(){
  if(loading.value)return
  controller=new AbortController();loading.value=true;error.value=''
  const timeout=setTimeout(()=>controller?.abort(),15000)
  try{
-  const [overview,list,member]=await Promise.all([api('/overview','GET',undefined,{},controller.signal),api('/orders','GET',undefined,{},controller.signal),api('/membership','GET',undefined,{},controller.signal)])
+  const [overview,list,member]=await Promise.all([enabled('home')?api('/overview','GET',undefined,{},controller.signal):Promise.resolve({stats:{}}),enabled('orders')?api('/orders','GET',undefined,{},controller.signal):Promise.resolve({items:[]}),enabled('membership')?api('/membership','GET',undefined,{},controller.signal):Promise.resolve({membership:null})])
   summary.value=overview.stats;orders.value=list.items;membership.value=member.membership;loaded.value=true
  }catch(e){if(!controller.signal.aborted)error.value=(e as Error).message;else error.value='账户信息加载超时，请刷新重试。'}
  finally{clearTimeout(timeout);loading.value=false}
@@ -60,17 +62,17 @@ onUnmounted(()=>controller?.abort())
   <div class="profile-overview">
    <section class="profile-identity">
     <div class="profile-person"><span class="profile-avatar">{{user.name.slice(0,1)}}</span><div><h2>{{user.name}}</h2><div class="profile-email"><span>{{user.email}}</span><button @click="action(()=>copy(user.email))" aria-label="复制账户邮箱"><Copy :size="13"/></button></div></div><button class="profile-edit" @click="open('name')" aria-label="编辑称呼" title="编辑称呼"><Pencil :size="16"/></button></div>
-    <div class="profile-balance"><span>账户可用金额</span><strong>{{cash(Number(user.balance||0)-Number(user.frozen||0))}}<small>积分</small></strong><p>冻结金额 <b>{{cash(user.frozen)}} 积分</b></p></div>
-    <div class="profile-identity-foot"><span><ShieldCheck :size="15"/>{{user.role==='admin'?'管理员账户':'客户账户'}}</span><a href="#/wallet">管理资金<ArrowUpRight :size="16"/></a></div>
+    <div v-if="enabled('wallet')" class="profile-balance"><span>账户可用金额</span><strong>{{cash(Number(user.balance||0)-Number(user.frozen||0))}}<small>积分</small></strong><p>冻结金额 <b>{{cash(user.frozen)}} 积分</b></p></div>
+    <div class="profile-identity-foot"><span><ShieldCheck :size="15"/>{{user.role==='admin'?'管理员账户':'客户账户'}}</span><a v-if="enabled('wallet')" href="#/wallet">管理资金<ArrowUpRight :size="16"/></a></div>
    </section>
-   <div class="profile-metrics"><article v-for="m in metrics" :key="m.key" class="panel profile-metric"><div><span>{{m.name}}</span><component :is="m.icon" :size="17"/></div><strong>{{loaded?m.value:'—'}}<small>{{m.unit}}</small></strong><p>{{m.note}}</p></article></div>
+   <div v-if="metrics.length" class="profile-metrics"><article v-for="m in metrics" :key="m.key" class="panel profile-metric"><div><span>{{m.name}}</span><component :is="m.icon" :size="17"/></div><strong>{{loaded?m.value:'—'}}<small>{{m.unit}}</small></strong><p>{{m.note}}</p></article></div>
   </div>
   <section v-if="membership" class="panel profile-membership">
    <div class="profile-tier"><span class="profile-tier-emblem"><ShieldCheck :size="23"/><b>{{membership.current.code}}</b></span><div><span class="eyebrow">MEMBERSHIP</span><h2>{{membership.current.name}}</h2><p>{{membership.fee_override!=null?'专属服务单价 '+cash(membership.fee_override)+' 积分 / 次':'服务费减免 '+(100-membership.current.discount)+'%'}}</p></div></div>
    <div class="profile-growth"><div><span>会员成长</span><b>{{cash(membership.spent)}} <small>积分 有效消费</small></b></div><div class="profile-growth-track" role="progressbar" aria-label="账户会员成长" :aria-valuenow="membership.progress" aria-valuemin="0" aria-valuemax="100"><i :style="{width:membership.progress+'%'}"></i></div><p v-if="membership.next">距离自动升级至 <b>{{membership.next.name}}</b>，还需 {{cash(membership.remaining)}} 积分</p><p v-else>已达到最高自动等级</p><small v-if="membership.source==='manual'">当前为运营指定等级 · 自动等级 {{membership.automatic.name}}{{membership.until?' · 有效至 '+date(membership.until):''}}</small></div>
    <a class="profile-member-link" href="#/membership">查看权益<ArrowRight :size="16"/></a>
   </section>
-  <section class="panel profile-records">
+  <section v-if="enabled('orders')" class="panel profile-records">
    <div class="profile-records-heading"><div><span class="eyebrow">YOUR ACTIVITY</span><h2>订阅记录</h2><p>最近 200 笔记录，可按状态和服务方案筛选。</p></div><button class="btn secondary" @click="load" :disabled="loading"><RefreshCw :size="15" :class="{spinning:loading}"/>刷新记录</button></div>
    <div class="profile-record-filters"><div class="tabs"><button v-for="[id,label] in tabs" :key="id" :class="{active:tab===id}" @click="tab=id">{{label}}</button></div><select v-model="product" aria-label="筛选服务方案"><option value="">所有服务方案</option><option v-for="[id,label] in products" :key="id" :value="id">{{label}}</option></select></div>
    <DataTable :searchable="true" :rows="filtered" :columns="columns"><template #account="{row}"><b>{{row.email}}</b><small class="mono">{{row.id.slice(0,16)}}</small></template><template #fee="{row}">{{cash(row.fee)}} 积分</template><template #status="{row}"><span class="badge order-status" :class="orderTone(row)">{{orderLabel(row)}}</span></template><template #updated_at="{row}">{{date(row.updated_at)}}</template><template #action="{row}"><button class="text-btn" @click="emit('order',row)">查看进度<ArrowUpRight :size="13"/></button></template></DataTable>

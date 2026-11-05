@@ -40,6 +40,7 @@ def credit(q,request,user_id,kind,reference,description,amount):
 def wallet(request: Request):
     user=current(request)
     ledger=db.all(LEDGER_QUERY,user['id'])
+    project_ledger(ledger,user)
     return {'balance':user['balance'],'frozen':user['frozen'],'ledger':ledger,'topups':db.all('SELECT * FROM topups WHERE user_id=$1 ORDER BY created_at DESC LIMIT 200',user['id']),
             'recharges':db.all(RECHARGE_QUERY,user['id'])}
 
@@ -69,8 +70,16 @@ RECHARGE_QUERY="""WITH credits AS (
 @router.get('/v1/wallet')
 def api_wallet(request: Request):
     from .membership import membership_for
+    from .features import allowed
     u=current(request)
-    return {'balance':u['balance'],'frozen':u['frozen'],'fee_override':u['fee_override'],'membership':membership_for(u['id']),'unit':'cent_R'}
+    return {'balance':u['balance'],'frozen':u['frozen'],'fee_override':u['fee_override'] if allowed('membership',u) else None,'membership':membership_for(u['id']) if allowed('membership',u) else None,'unit':'cent_R'}
+
+
+def project_ledger(rows,user):
+    from .features import allowed
+    if not allowed('orders',user):
+        for row in rows: row.update(order_id=None,related_order=None,payment={})
+    return rows
 
 
 @router.post('/topups')

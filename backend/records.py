@@ -6,6 +6,8 @@ from .membership import membership_for,fee_for,fee_source
 from .product_ids import public_id, public_order
 from .runtime import order_workflows, queue_message, worker_mode
 from . import payment_trace
+from .features import capabilities, project_user
+from .email_auth import security_config, mail_ready
 
 public_router=APIRouter(prefix='/api')
 router=APIRouter(prefix='/api',dependencies=[Depends(member)])
@@ -67,7 +69,8 @@ def public():
     cfg=config('payment')
     flow=cfg.get('subscription_flow') or ''
     connected=cfg.get('enabled') is True and flow in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')
-    return {'site':config('site'),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort'),'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected,'payment_connected':connected,'subscription_flow':flow if connected else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers')}
+    flags=capabilities()
+    return {'site':config('site'),'features':flags,'security':dict(security_config(),password_reset_available=mail_ready()),'products':db.all('SELECT * FROM products WHERE enabled ORDER BY sort') if any(flags[k] for k in ('subscribe','links','membership')) else [],'announcements':db.all(ANN+' AND login_visible ORDER BY sort,created_at DESC'),'checkout_connected':connected and flags['links'],'payment_connected':connected and flags['subscribe'],'subscription_flow':flow if connected and (flags['subscribe'] or flags['links']) else '','default_country':config('scheduler')['default_country'],'tiers':config('tiers') if flags['membership'] else {}}
 
 
 @router.get('/overview')
@@ -75,7 +78,12 @@ def overview(request:Request):
     user=current(request)
     stats=db.one("SELECT count(*) AS orders,count(*) FILTER(WHERE status='succeeded') AS succeeded,count(*) FILTER(WHERE status IN ('draft','queued','processing','awaiting_payment') AND NOT(workflow='link' AND status='awaiting_payment')) AS pending FROM orders WHERE user_id=$1 AND deleted_at IS NULL",user['id'])
     stats.update(db.one("SELECT COALESCE(sum(-amount) FILTER(WHERE kind='charge'),0) AS used,COALESCE(sum(amount) FILTER(WHERE kind IN ('topup','redeem')),0) AS credited FROM ledger WHERE user_id=$1",user['id']))
-    return {'user':user,'stats':stats,'recent_orders':db.all('SELECT '+ORDER_FIELDS+' FROM orders o WHERE user_id=$1 AND o.deleted_at IS NULL ORDER BY created_at DESC LIMIT 5',user['id']),'announcements':db.all(ANN+' ORDER BY sort,created_at DESC')}
+    flags=capabilities(user)
+    if not flags['orders']:
+        for key in ('orders','succeeded','pending'): stats.pop(key,None)
+    if not flags['wallet']:
+        for key in ('used','credited'): stats.pop(key,None)
+    return {'user':project_user(user),'stats':stats,'recent_orders':db.all('SELECT '+ORDER_FIELDS+' FROM orders o WHERE user_id=$1 AND o.deleted_at IS NULL ORDER BY created_at DESC LIMIT 5',user['id']) if flags['orders'] else [],'announcements':db.all(ANN+' ORDER BY sort,created_at DESC')}
 
 
 @router.get('/announcements')
@@ -165,7 +173,8 @@ def catalog(request:Request):
         p['member_fee']=fee_for(m,p['fee'],p['id']);p['price_source']=fee_source(m,p['id']);p['id']=public_id(p['id'])
     countries=[{'code':code,'name':name,'currency':currency} for code,name,currency in [('PH','菲律宾','PHP'),('US','美国','USD'),('JP','日本','JPY'),('SG','新加坡','SGD'),('GB','英国','GBP'),('EG','埃及','EGP'),('TR','土耳其','TRY')]]
     cfg=config('payment')
-    return {'items':products,'membership':m,'unit':'cent_R','countries':countries,'payment_connected':cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')}
+    flags=capabilities(current(request))
+    return {'items':products,'membership':m if flags['membership'] else None,'unit':'cent_R','countries':countries,'payment_connected':flags['subscribe'] and cfg.get('enabled') is True and cfg.get('subscription_flow') in ('gener_direct_pay','cslive_go_direct_pay','cslive_full_go')}
 
 
 @admin_router.get('/overview')

@@ -78,6 +78,7 @@ def ledger(request: Request, page: int = Query(1, ge=1, le=100000),
            page_size: int = Query(50, ge=1, le=200)):
     query = wallet.LEDGER_QUERY.replace('LIMIT 300', 'LIMIT $2 OFFSET $3')
     items = db.all(query, current(request)['id'], page_size, (page - 1) * page_size)
+    wallet.project_ledger(items,current(request))
     total = db.scalar('SELECT count(*) FROM ledger WHERE user_id=$1', current(request)['id'])
     return page_result(items, total, page, page_size)
 

@@ -147,14 +147,21 @@ def authenticate(request: Request, admin=False, apply_limit=True):
     if admin and user['role'] != 'admin':
         event(request, 'permission_denied', 'high', '尝试访问运营接口')
         raise BusinessError('仅管理员可访问', 403)
+    if not admin:
+        from .features import enforce
+        enforce(request, user)
     if apply_limit and not limit('api:'+user['id'], config('risk').get('api_per_minute',120)):
         event(request, 'rate_limit', 'medium', '账户请求频率超限')
         raise BusinessError('操作频繁，请稍后再试', 429)
     return user
 
 
-def member(request: Request):
-    return authenticate(request)
+async def member(request: Request):
+    from starlette.concurrency import run_in_threadpool
+    from .features import enforce_payload
+    user = await run_in_threadpool(authenticate, request)
+    await enforce_payload(request, user)
+    return user
 
 
 def administrator(request: Request):

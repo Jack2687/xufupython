@@ -11,6 +11,20 @@ CREATE TABLE IF NOT EXISTS sessions (hash text PRIMARY KEY,user_id text REFERENC
 CREATE TABLE IF NOT EXISTS api_keys (id text PRIMARY KEY,user_id text NOT NULL REFERENCES users(id),name text NOT NULL,hash text UNIQUE NOT NULL,prefix text NOT NULL,revoked boolean NOT NULL DEFAULT false,last_used timestamptz,created_at timestamptz DEFAULT now());
 
 CREATE TABLE IF NOT EXISTS settings (key text PRIMARY KEY,value jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS email_challenges (
+ email text NOT NULL,purpose text NOT NULL CHECK(purpose IN ('register','reset')),
+ secret_hash text NOT NULL,user_id text REFERENCES users(id) ON DELETE CASCADE,
+ credential_hash text NOT NULL DEFAULT '',attempts int NOT NULL DEFAULT 0,
+ delivered boolean NOT NULL DEFAULT false,created_at timestamptz NOT NULL DEFAULT now(),
+ expires_at timestamptz NOT NULL,PRIMARY KEY(email,purpose)
+);
+CREATE INDEX IF NOT EXISTS email_challenges_expiry ON email_challenges(expires_at);
+CREATE TABLE IF NOT EXISTS mail_deliveries (
+ id text PRIMARY KEY,recipient text NOT NULL,purpose text NOT NULL CHECK(purpose IN ('register','reset','test')),
+ status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','failed')),
+ detail text NOT NULL DEFAULT '',created_at timestamptz NOT NULL DEFAULT now(),completed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS mail_deliveries_created ON mail_deliveries(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS products (id text PRIMARY KEY,name text NOT NULL,description text NOT NULL,fee bigint NOT NULL CHECK(fee>=0),enabled boolean NOT NULL DEFAULT true,sort int NOT NULL DEFAULT 0,tag text NOT NULL DEFAULT '',features jsonb NOT NULL DEFAULT '[]');
 

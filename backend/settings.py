@@ -5,6 +5,7 @@ from . import db
 from .common import *
 from .seed import DEFAULTS
 from .post_payment_delay import DEFAULT_SECONDS, MAX_SECONDS
+from .email_auth import normalize_domains, public_mail, mail_ready
 
 router = APIRouter(prefix='/api/admin', dependencies=[Depends(administrator)])
 COUNTRIES = {'PH','US','JP','SG','GB','EG','TR'}
@@ -22,6 +23,26 @@ OPTIONAL = {'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_fl
 
 def validate_config(key, v):
     require(key in DEFAULTS, '不支持的配置组')
+    if key == 'features':
+        require(set(v) == set(DEFAULTS[key]) and all(type(x) is bool for x in v.values()), '功能开关配置无效')
+        return
+    if key == 'security':
+        require(set(v) == set(DEFAULTS[key]), '安全配置字段无效')
+        require(all(type(v.get(k)) is bool for k in ('registration_open', 'email_verify_enabled')), '注册与邮箱验证必须为开关')
+        v['email_domain_whitelist'] = normalize_domains(v['email_domain_whitelist'])
+        return
+    if key == 'mail':
+        writable = (set(DEFAULTS[key]) - {'password_enc'}) | {'password','clear_password','password_configured','ready'}
+        require(not set(v)-writable and not (set(DEFAULTS[key])-{'password_enc'})-set(v), '邮件配置字段无效')
+        require(type(v.get('enabled')) is bool and type(v.get('clear_password',False)) is bool, '邮件开关格式无效')
+        integer(v.get('port'), 1, 65535, 'SMTP 端口无效')
+        require(v.get('encryption') in ('ssl','starttls'), '请选择 SSL/TLS 或 STARTTLS 加密')
+        for field in ('host','username','from_email','from_name','password'):
+            require(0 <= length(v.get(field,'')) <= (1000 if field=='password' else 254) and not any(c in v.get(field,'') for c in '\r\n\x00'), '邮件配置内容无效')
+        require(not v['host'] or re.fullmatch(r'[a-zA-Z0-9._-]+',v['host']), 'SMTP 主机请填写域名或 IPv4 地址')
+        require(not v['from_email'] or email_valid(v['from_email']), '发件邮箱无效')
+        require(not v['enabled'] or v['host'] and v['from_email'], '启用邮件服务前请填写 SMTP 主机和发件邮箱')
+        return
     allowed = set(DEFAULTS[key]) | OPTIONAL.get(key,set())
     require(not set(v)-allowed, '未知配置字段')
     require(not allowed-set(v)-OPTIONAL.get(key,set()), '缺少配置字段')
@@ -88,6 +109,8 @@ def settings():
     result['payment'].setdefault('post_payment_delay_seconds', DEFAULT_SECONDS)
     for name in ('cslive_go_visit_return','cslive_go_refresh_before_renewal'):
         result['payment'].setdefault(name, True)
+    result['mail'] = public_mail(result['mail'])
+    result['security']['registration_open'] = result['site']['registration_open']
     return result
 
 
@@ -95,9 +118,21 @@ def settings():
 async def save_settings(key:str,request:Request):
     v=await body(request);validate_config(key,v)
     with db.transaction() as q:
+        if key in ('site','security','mail'): q.execute('SELECT pg_advisory_xact_lock(1886031)')
         if key=='proxy': q.execute('SELECT pg_advisory_xact_lock(1886003)')
         if key=='tiers': q.execute('SELECT pg_advisory_xact_lock(782518860)')
         previous=q.scalar('SELECT value FROM settings WHERE key=$1 FOR UPDATE',key)
+        if key == 'mail':
+            secret = encrypt(v['password']) if v.get('password') else ('' if v.get('clear_password') else previous.get('password_enc',''))
+            v = {k:x for k,x in v.items() if k in DEFAULTS['mail']}
+            v['password_enc'] = secret
+            require(not v['enabled'] or mail_ready(v), '请填写 SMTP 授权码或密码')
+            require(not config('security',q).get('email_verify_enabled') or mail_ready(v), '请先关闭注册邮箱验证，再停用邮件服务')
+        if key == 'security':
+            require(not v['email_verify_enabled'] or mail_ready(config('mail',q)), '请先配置并启用邮件服务，再开启邮箱验证')
+            q.execute("UPDATE settings SET value=jsonb_set(value,'{registration_open}',$1::jsonb) WHERE key='site'", json.dumps(v['registration_open']))
+        if key == 'site':
+            q.execute("UPDATE settings SET value=jsonb_set(value,'{registration_open}',$1::jsonb) WHERE key='security'", json.dumps(v['registration_open']))
         for name in OPTIONAL.get(key,set()):
             if name not in v and name in previous: v[name]=previous[name]
         if key=='payment' and v.get('subscription_flow')=='gener_direct_pay':

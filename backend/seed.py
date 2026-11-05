@@ -11,6 +11,9 @@ TIERS = [
     {'code':'L9','name':'合作伙伴','threshold':10000000,'discount':20,'description':'服务费减免 80%'},
 ]
 DEFAULTS = {
+    'features': {name: True for name in ('home','subscribe','orders','wallet','links','renewal','keys','invites','membership','docs')},
+    'security': {'registration_open':True,'email_verify_enabled':False,'email_domain_whitelist':[]},
+    'mail': {'enabled':False,'host':'','port':465,'username':'','password_enc':'','from_email':'','from_name':'','encryption':'ssl'},
     'invites': {'enabled':True,'rate_percent':5},
     'site': {'name':'序付','english_name':'XUPAY','tagline':'让每一笔订阅，清晰有序。','registration_open':True,'support_url':'','terms':'请仅提交本人或已获授权的账号与银行卡。服务费与上游订阅费用分别结算，订单处理结果以订单记录为准。','billing_country':'US','billing_mode':'customer_review','invite_rate':0},
     'risk': {'login_per_minute':10,'api_per_minute':120,'order_per_minute':5,'max_open_orders':10,'max_topup':10000000,'session_hours':24,'event_retention_days':90},
@@ -25,6 +28,8 @@ DEFAULTS = {
 def seed():
     with db.transaction() as q:
         for key, value in DEFAULTS.items():
+            if key == 'security':
+                value = dict(value, registration_open=q.scalar("SELECT value->'registration_open' FROM settings WHERE key='site'", default=True))
             q.execute('INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT DO NOTHING',key,value)
         products = [('pro5x','Pro 5x','灵活开启，更适合轻量使用','轻量进阶'),('pro','Pro 20x','为高频工作提供充足空间','热门选择'),('team','Team 标准','将团队协作放到同一个空间','团队协作'),('team_premium','Team 高级','为团队成员配置更高使用额度','弹性席位')]
         for i, (pid,name,description,tag) in enumerate(products):
