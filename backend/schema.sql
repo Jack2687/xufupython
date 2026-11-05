@@ -62,6 +62,7 @@ CREATE INDEX IF NOT EXISTS ledger_user_time ON ledger(user_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS topups (id text PRIMARY KEY,user_id text NOT NULL REFERENCES users(id),amount bigint NOT NULL CHECK(amount>0),method text NOT NULL DEFAULT 'manual',proof text NOT NULL DEFAULT '',status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),note text NOT NULL DEFAULT '',reviewed_by text REFERENCES users(id),created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
 
 CREATE TABLE IF NOT EXISTS redeem_codes (id text PRIMARY KEY,code_hash text UNIQUE NOT NULL,code_enc text NOT NULL,prefix text NOT NULL,amount bigint NOT NULL CHECK(amount>0),batch text NOT NULL,status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','used','disabled')),used_by text REFERENCES users(id),used_at timestamptz,expires_at timestamptz NOT NULL,created_at timestamptz DEFAULT now());
+CREATE INDEX IF NOT EXISTS redeem_codes_used_at ON redeem_codes(used_at DESC,id DESC) WHERE used_by IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS announcements (id text PRIMARY KEY,title text NOT NULL,body text NOT NULL,tone text NOT NULL DEFAULT 'info',published boolean NOT NULL DEFAULT false,login_visible boolean NOT NULL DEFAULT false,sort int NOT NULL DEFAULT 0,starts_at timestamptz,ends_at timestamptz,created_at timestamptz DEFAULT now());
 

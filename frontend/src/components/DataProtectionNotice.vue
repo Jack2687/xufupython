@@ -1,0 +1,1 @@
+<script setup lang="ts">import {ShieldCheck} from 'lucide-vue-next';</script><template><div style="display:flex;align-items:center;gap:10px;padding:15px 18px;margin-bottom:20px;background:#edf7f0;border:1px solid #cee4d5;border-radius:12px;color:#25523b;font-size:14px"><ShieldCheck :size="21" aria-hidden="true"/><strong>敏感数据已加密保护</strong></div></template>

@@ -36,6 +36,7 @@ services:
       MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY; preserve it when migrating data}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1,::1}
       BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-admin}
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:?Set BOOTSTRAP_PASSWORD for an empty database}
       TZ: Asia/Shanghai

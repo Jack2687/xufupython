@@ -130,7 +130,11 @@ def daily_limit(key, maximum):
 
 @router.post('/auth/email-code')
 async def send_code(request: Request, background: BackgroundTasks):
-    value = await body(request)
+    from .auth_runtime import run_auth
+    return await run_auth(send_code_sync,request,background,await body(request))
+
+
+def send_code_sync(request, background, value):
     purpose = value.get('purpose')
     email = str(value.get('email', '')).strip().lower()
     require(purpose in ('register', 'reset') and email_valid(email), '请填写有效邮箱')

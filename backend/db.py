@@ -2,6 +2,7 @@
 import os
 import re
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +12,16 @@ from psycopg2.pool import ThreadedConnectionPool
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env', override=False)
 _pool = None
+_request_timeouts = ContextVar('request_database_timeouts', default=False)
+
+
+@contextmanager
+def request_timeouts():
+    token = _request_timeouts.set(True)
+    try:
+        yield
+    finally:
+        _request_timeouts.reset(token)
 
 
 def pool():
@@ -60,6 +71,8 @@ def transaction():
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                if _request_timeouts.get():
+                    cursor.execute("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='10s'")
                 yield Query(cursor)
     finally:
         pool().putconn(conn)

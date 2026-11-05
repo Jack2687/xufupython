@@ -198,6 +198,11 @@ def codes(page: int=1,page_size: int=100,q: str='',status: str=''):
     return redeem_codes.listing(page,page_size,q,status)
 
 
+@router.get('/codes/usage')
+def code_usage(period: str='day',date: str='',q: str='',page: int=1,page_size: int=50):
+    return redeem_codes.usage(period,date,q,page,page_size)
+
+
 @router.post('/codes')
 async def create_codes(request: Request):
     return await run_in_threadpool(redeem_codes.create,request,await body(request))

@@ -5,6 +5,8 @@ from psycopg2.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 
 from . import db
 from .common import BusinessError, audit, current, decrypt, digest, encrypt, integer, now, require, uid
+from .report_period import report_period
+from datetime import timedelta
 
 LOCK_TIMEOUT = '3s'
 STATEMENT_TIMEOUT = '10s'
@@ -53,6 +55,18 @@ def listing(page, page_size, search, status):
         total = q.scalar('SELECT count(*) '+source, status, pattern)
         items = q.all(f'SELECT c.id,c.prefix,c.amount,c.batch,{EFFECTIVE_STATUS} AS status,c.used_at,c.expires_at,c.created_at,u.email AS used_by '+source+' ORDER BY c.created_at DESC,c.id DESC LIMIT $3 OFFSET $4', status, pattern, page_size, (page-1)*page_size)
     return {'items': items, 'total': total, 'page': page, 'page_size': page_size, 'has_more': page*page_size < total}
+
+
+def usage(period, anchor, search, page, page_size):
+    integer(page,1,1000000);integer(page_size,1,100)
+    require(isinstance(search,str) and len(search)<=200,'搜索内容过长')
+    start,end=report_period(period,anchor)
+    pattern='%'+search.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+    where="FROM redeem_codes c LEFT JOIN users u ON u.id=c.used_by WHERE c.used_at >= $1 AND c.used_at < $2 AND c.used_by IS NOT NULL AND (c.prefix ILIKE $3 OR c.batch ILIKE $3 OR u.email ILIKE $3 OR u.name ILIKE $3)"
+    with transaction(readonly=True) as q:
+        summary=q.one('SELECT count(*) AS redemptions,count(DISTINCT c.id) AS codes,count(DISTINCT c.used_by) AS accounts,COALESCE(sum(c.amount),0) AS amount '+where,start,end,pattern)
+        items=q.all('SELECT c.id,c.id AS code_id,c.prefix,c.used_by AS user_id,u.email,u.name,c.batch AS note,c.amount,c.used_at AS redeemed_at '+where+' ORDER BY c.used_at DESC,c.id DESC LIMIT $4 OFFSET $5',start,end,pattern,page_size,(page-1)*page_size)
+    return {'items':items,'summary':summary,'total':summary['redemptions'],'page':page,'page_size':page_size,'start_date':start.date().isoformat(),'end_date':(end-timedelta(days=1)).date().isoformat(),'timezone':'Asia/Shanghai'}
 
 
 def create(request, value):

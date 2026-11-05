@@ -22,8 +22,8 @@ from fastapi.testclient import TestClient
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 env=dotenv_values(ROOT/'.env')
-url=urlsplit(env['DATABASE_URL'])
-assert url.hostname=='127.0.0.1' and url.port==18972, 'Tests are restricted to the new local cluster'
+url=urlsplit(os.environ.get('XUFU_TEST_DATABASE_URL') or env['DATABASE_URL'])
+assert url.hostname=='127.0.0.1' and url.port in (18972,18983), 'Tests are restricted to isolated local clusters'
 TEST_DB='xufu_python_test_'+secrets.token_hex(6)
 admin_conn=psycopg2.connect(host=url.hostname,port=url.port,user=url.username,password=url.password,dbname='postgres')
 admin_conn.autocommit=True
@@ -48,9 +48,11 @@ from test_custom_menus import CustomMenuTests
 from test_branding import BrandingTests
 from test_checkout_diagnostics import CheckoutDiagnosticTests
 from test_redeem_codes import RedeemCodeTests
+from test_auth_security import AuthSecurityTests
+from test_redeem_usage import RedeemUsageTests
 
 
-class BackendTests(RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -1190,7 +1192,7 @@ if __name__=='__main__':
     try:
         suite=unittest.defaultTestLoader.loadTestsFromNames(sys.argv[1:],module=sys.modules[__name__]) if len(sys.argv)>1 else unittest.defaultTestLoader.loadTestsFromTestCase(BackendTests)
         result=unittest.TextTestRunner(verbosity=2).run(suite)
-        (ROOT/('.local/targeted-test-result.json' if len(sys.argv)>1 else '.local/test-result.json')).write_text(json.dumps({'tests':result.testsRun,'failures':len(result.failures),'errors':len(result.errors),'passed':result.wasSuccessful(),'database':'disposable on 18972','external_requests':'mock only'},indent=2),encoding='utf-8')
+        (ROOT/('.local/targeted-test-result.json' if len(sys.argv)>1 else '.local/test-result.json')).write_text(json.dumps({'tests':result.testsRun,'failures':len(result.failures),'errors':len(result.errors),'passed':result.wasSuccessful(),'database':f'disposable on {url.port}','external_requests':'mock only'},indent=2),encoding='utf-8')
     finally:
         db.close()
         with admin_conn.cursor() as cur:

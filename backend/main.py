@@ -16,6 +16,8 @@ from .seed import seed
 from .runtime import worker_mode
 from . import customer_api, admin_orders, order_updates, invitations, email_auth, features, custom_menus, branding
 from .request_origin import configured_origin, origin_allowed
+from .auth_runtime import bounded_call
+from starlette.concurrency import run_in_threadpool
 
 PUBLIC_ORIGIN = configured_origin(os.getenv('PUBLIC_ORIGIN', ''))
 
@@ -113,14 +115,19 @@ async def security(request:Request,call_next):
         size=request.headers.get('content-length')
         require(not size or size.isdigit() and int(size)<=1048576,'请求内容过大',413)
         if not request.url.path.startswith('/health/'):
-            require(not db.scalar('SELECT ip FROM blocked_ips WHERE ip=$1 AND expires_at>now()',ip(request)),'当前来源暂不可访问',403)
-            require(limit('edge:'+ip(request),600),'请求过于频繁',429)
+            await run_in_threadpool(bounded_call,check_source,request)
         result=await call_next(request)
     except BusinessError as e:result=response({'error':e.message},e.status)
     except Exception as e:
         log.error('Request failed (%s)',type(e).__name__);result=response({'error':'操作未完成，请稍后重试'},500)
     for k,v in HEADERS.items():result.headers[k]=v
     return result
+
+
+def check_source(request):
+    source=ip(request)
+    require(not db.scalar('SELECT ip FROM blocked_ips WHERE ip=$1 AND expires_at>now()',source),'当前来源暂不可访问',403)
+    require(limit('edge:'+source,600),'请求过于频繁',429)
 
 
 for module in (auth,email_auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)

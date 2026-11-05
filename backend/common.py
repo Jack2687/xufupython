@@ -88,7 +88,8 @@ def config(key, q=None):
 
 
 def ip(request):
-    return request.client.host if request.client else '127.0.0.1'
+    from .request_source import client_ip
+    return client_ip(request)
 
 
 def current(request):
