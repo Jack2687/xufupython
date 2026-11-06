@@ -38,6 +38,7 @@ onMounted(()=>{if(props.group==='mail')void loadLogs()})
     <p v-if="!form.orders&&(form.subscribe||form.links)" class="callout">订单中心已关闭：客户仍可提交已开放的服务，但无法查询订单记录和进度。</p>
    </template>
    <template v-else-if="group==='security'">
+    <label class="control-row"><span><b>登录滑动验证</b><small>登录前完成滑块验证，验证结果由服务器校验且仅可使用一次。</small></span><input class="toggle" type="checkbox" v-model="form.login_slider_enabled"/></label>
     <label class="control-row"><span><b>开放注册</b><small>允许访客自行创建账户；关闭后管理员仍可创建客户账户。</small></span><input class="toggle" type="checkbox" v-model="form.registration_open"/></label>
     <label class="control-row"><span><b>邮箱验证</b><small>注册必须先验证邮箱。开启前，请保存邮件配置并发送测试邮件。</small></span><input class="toggle" type="checkbox" v-model="form.email_verify_enabled"/></label>
     <label class="domain-field">邮箱域名白名单<textarea v-model="domains" rows="6" placeholder="qq.com&#10;gmail.com&#10;*.example.com" maxlength="26000"></textarea><small>留空允许所有邮箱。支持换行、逗号或空格分隔；example.com 仅匹配该域名，*.example.com 匹配该域名及其子域名。</small></label>

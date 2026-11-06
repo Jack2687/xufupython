@@ -2,6 +2,8 @@
 import {computed,onUnmounted,ref,watch} from 'vue'
 import {ArrowRight,ArrowLeft,ShieldCheck,LoaderCircle} from 'lucide-vue-next'
 import {api,type Row} from '../lib'
+import LoginSlider from './LoginSlider.vue'
+const slider=ref<InstanceType<typeof LoginSlider>|null>(null),sliderProof=ref('')
 const props=defineProps<{pub:Row}>()
 const emit=defineEmits<{authenticated:[]}>()
 const mode=ref<'login'|'register'|'reset'>('login'),email=ref(''),password=ref(''),confirm=ref(''),name=ref(''),code=ref(''),invite=ref(new URLSearchParams(location.search).get('invite')||'')
@@ -30,10 +32,10 @@ async function submit(){
  busy.value=true
  try{
   const path=mode.value==='reset'?'reset-password':mode.value
-  const result=await api('/auth/'+path,'POST',{email:email.value,password:password.value,...(mode.value==='register'?{name:name.value,invite:invite.value,code:code.value}:mode.value==='reset'?{code:code.value}:{})})
+  const result=await api('/auth/'+path,'POST',{email:email.value,password:password.value,...(mode.value==='register'?{name:name.value,invite:invite.value,code:code.value}:mode.value==='reset'?{code:code.value}:{slider_proof:sliderProof.value})})
   password.value='';code.value=''
   if(mode.value==='reset'){mode.value='login';queueMicrotask(()=>{message.value=result.message})}else emit('authenticated')
- }catch(e){error.value=(e as Error).message}finally{busy.value=false}
+ }catch(e){error.value=(e as Error).message;if(mode.value==='login')void slider.value?.reset()}finally{busy.value=false}
 }
 </script>
 <template>
@@ -52,6 +54,7 @@ async function submit(){
   <label v-if="mode==='reset'">确认新密码<input v-model="confirm" type="password" required minlength="1" maxlength="72" autocomplete="new-password" placeholder="再输入一次新密码"/></label>
   <label v-if="mode==='register'&&pub.features?.invites!==false">邀请标识（选填）<input v-model="invite" maxlength="80" placeholder="来自伙伴的邀请标识"/></label>
   <div v-if="mode==='login'&&policy.password_reset_available" class="auth-forgot"><button type="button" class="text-btn" :disabled="busy||sending" @click="mode='reset'">忘记密码？</button></div>
+  <LoginSlider v-if="mode==='login'&&policy.login_slider_enabled!==false" ref="slider" @verified="sliderProof=$event"/>
   <button class="btn primary full" :disabled="busy||sending"><LoaderCircle v-if="busy" class="spinning" :size="18"/>{{busy?'请稍候…':mode==='register'?(needsCode?'验证并注册账户':'注册账户'):mode==='reset'?'重置密码':'进入工作台'}}<ArrowRight v-if="!busy" :size="18"/></button>
   <div class="login-hint"><ShieldCheck :size="15"/>{{mode==='reset'?'重置后原登录会话和 API 密钥将失效':'仅在你自己的账户空间查看业务资料'}}</div>
  </form>

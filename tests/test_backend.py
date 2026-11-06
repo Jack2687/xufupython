@@ -63,7 +63,8 @@ class BackendTests(RegionalPriceTests,CountryPoolTests,TeamSubscriptionTests,Reg
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
             cls.client=TestClient(app);cls.client.__enter__()
-        result=cls.client.post('/api/auth/login',json={'email':'admin','password':'admin'})
+        db.execute("UPDATE settings SET value=jsonb_set(value,'{login_slider_enabled}','false') WHERE key='security'")
+        result=cls.client.post('/api/auth/login' ,json={'email':'admin','password':'admin'})
         assert result.status_code==200,result.text
 
     @classmethod

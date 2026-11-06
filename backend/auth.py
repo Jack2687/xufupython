@@ -39,6 +39,8 @@ def login_sync(request, v):
     if not limit('login:'+ip(request),config('risk').get('login_per_minute',10)):
         event(request,'login_rate','high','登录尝试频繁')
         raise BusinessError('登录尝试过多，请一分钟后再试',429)
+    from .login_slider import consume as consume_slider
+    consume_slider(request,v.get('slider_proof'))
     require(isinstance(v.get('password'),str) and length(v['password'])<=72,'账号或密码不正确',401)
     user = db.one('SELECT id,password_hash,status FROM users WHERE email=$1 AND deleted_at IS NULL',str(v.get('email','')).strip().lower())
     dummy = '$2b$12$vuCQLWceDWoxSWQG6TLbqep2q5iYtXvwi5ok8gQ9MluCb8FH13H96'

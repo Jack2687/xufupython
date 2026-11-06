@@ -250,16 +250,34 @@ CREATE TABLE IF NOT EXISTS invitation_rewards (
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),CHECK(inviter_id<>invitee_id)
 );
 CREATE INDEX IF NOT EXISTS invitation_reward_owner ON invitation_rewards(inviter_id);
+-- Preserve existing rewards and legacy pending first-order candidates.
+ALTER TABLE invitation_candidates ADD COLUMN IF NOT EXISTS reward_version integer NOT NULL DEFAULT 1;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='invitation_rewards'::regclass AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (invitee_id)') THEN
+  ALTER TABLE invitation_rewards DROP CONSTRAINT invitation_rewards_pkey;
+  ALTER TABLE invitation_rewards ADD PRIMARY KEY(order_id);
+ END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS invitation_reward_invitee ON invitation_rewards(invitee_id);
+CREATE TABLE IF NOT EXISTS auth_slider_challenges (
+ id text PRIMARY KEY,binding text NOT NULL,target integer NOT NULL,proof_hash text UNIQUE,
+ created_at timestamptz NOT NULL DEFAULT now(),expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS auth_slider_expiry ON auth_slider_challenges(expires_at);
 CREATE OR REPLACE FUNCTION snapshot_invitation() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE inviter text; rules jsonb;
+DECLARE inviter text; joined timestamptz; rules jsonb; rate integer;
 BEGIN
  IF NEW.workflow<>'subscription' THEN RETURN NEW; END IF;
  SELECT value INTO rules FROM settings WHERE key='invites';
  IF rules->>'enabled' IS DISTINCT FROM 'true' THEN RETURN NEW; END IF;
- SELECT invited_by INTO inviter FROM users WHERE id=NEW.user_id;
- IF inviter IS NOT NULL AND inviter<>NEW.user_id THEN
-  INSERT INTO invitation_candidates(order_id,invitee_id,inviter_id,rate_percent)
-  VALUES(NEW.id,NEW.user_id,inviter,(rules->>'rate_percent')::int) ON CONFLICT DO NOTHING;
+ SELECT invited_by,created_at INTO inviter,joined FROM users WHERE id=NEW.user_id;
+ IF inviter IS NOT NULL AND inviter<>NEW.user_id AND NEW.created_at>=joined THEN
+  SELECT (s->>'rate_percent')::int INTO rate FROM jsonb_array_elements(rules->'stages') s
+   WHERE NEW.created_at<joined+(s->>'until_days')::int*interval '1 day' ORDER BY (s->>'until_days')::int LIMIT 1;
+  IF rate>0 THEN
+   INSERT INTO invitation_candidates(order_id,invitee_id,inviter_id,rate_percent,reward_version)
+   VALUES(NEW.id,NEW.user_id,inviter,rate,2) ON CONFLICT DO NOTHING;
+  END IF;
  END IF;
  RETURN NEW;
 END $$;

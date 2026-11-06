@@ -24,6 +24,16 @@ OPTIONAL = {'site': {'icon'}, 'proxy': {'global_id','mode'}, 'payment': {'checko
 
 def validate_config(key, v):
     require(key in DEFAULTS, '不支持的配置组')
+    if key=='invites':
+        require(isinstance(v,dict) and set(v)=={'enabled','stages'} and type(v['enabled']) is bool,'邀请配置字段无效')
+        stages=v['stages'];require(isinstance(stages,list) and len(stages)==3,'请配置三个奖励阶段')
+        last_day=0;last_rate=31
+        for stage in stages:
+            require(isinstance(stage,dict) and set(stage)=={'until_days','rate_percent'},'阶段配置无效')
+            day=integer(stage['until_days'],1,365);rate=integer(stage['rate_percent'],1,30)
+            require(day>last_day and rate<last_rate,'阶段天数须递增，奖励比例须逐段降低')
+            last_day,last_rate=day,rate
+        return
     if key=='regions':
         from .regions import validate
         require(isinstance(v,dict) and set(v)=={'items'} and isinstance(v['items'],list) and len(v['items'])<=300,'地区配置无效')
@@ -38,8 +48,9 @@ def validate_config(key, v):
         require(set(v) == set(DEFAULTS[key]) and all(type(x) is bool for x in v.values()), '功能开关配置无效')
         return
     if key == 'security':
+        v.setdefault('login_slider_enabled',config('security').get('login_slider_enabled',True))
         require(set(v) == set(DEFAULTS[key]), '安全配置字段无效')
-        require(all(type(v.get(k)) is bool for k in ('registration_open', 'email_verify_enabled')), '注册与邮箱验证必须为开关')
+        require(all(type(v.get(k)) is bool for k in ('registration_open', 'email_verify_enabled', 'login_slider_enabled')), '注册与邮箱验证必须为开关')
         v['email_domain_whitelist'] = normalize_domains(v['email_domain_whitelist'])
         return
     if key == 'mail':

@@ -42,24 +42,25 @@ def settle():
             reclaim = min(row['granted']-row['recovered']-target, max(0,user['balance']-user['frozen']))
             recovered = row['recovered'] + reclaim
             if reclaim:
-                _entry(q,row['inviter_id'],-reclaim,f"invite-return:{row['invitee_id']}:{recovered}",'原订阅服务费退回，撤回对应邀请奖励')
-            q.execute('UPDATE invitation_rewards SET entitled=$2,recovered=$3,updated_at=now() WHERE invitee_id=$1',row['invitee_id'],target,recovered)
+                _entry(q,row['inviter_id'],-reclaim,f"invite-return:{row['order_id']}:{recovered}",'原订阅服务费退回，撤回对应邀请奖励')
+            q.execute('UPDATE invitation_rewards SET entitled=$2,recovered=$3,updated_at=now() WHERE order_id=$1',row['order_id'],target,recovered)
         rows = q.all("""SELECT c.*, first_charge.id AS charge_id FROM invitation_candidates c
           JOIN orders o ON o.id=c.order_id
           JOIN LATERAL (SELECT min(id) AS id FROM ledger WHERE order_id=o.id AND user_id=o.user_id AND kind='charge') first_charge ON first_charge.id IS NOT NULL
           WHERE o.status='succeeded' AND o.activation='active'
-          AND NOT EXISTS(SELECT 1 FROM invitation_rewards r WHERE r.invitee_id=c.invitee_id)
+          AND NOT EXISTS(SELECT 1 FROM invitation_rewards r WHERE r.order_id=c.order_id)
+          AND (c.reward_version=2 OR (NOT EXISTS(SELECT 1 FROM invitation_rewards r WHERE r.invitee_id=c.invitee_id)
           AND NOT EXISTS(SELECT 1 FROM orders old JOIN ledger l ON l.order_id=old.id AND l.user_id=old.user_id AND l.kind='charge'
-            WHERE old.user_id=c.invitee_id AND old.workflow='subscription' AND old.status='succeeded' AND old.activation='active' AND l.id<first_charge.id)
+            WHERE old.user_id=c.invitee_id AND old.workflow='subscription' AND old.status='succeeded' AND old.activation='active' AND l.id<first_charge.id)))
           ORDER BY first_charge.id LIMIT 200""")
         for row in rows:
             fee = q.scalar(NET_FEE, row['order_id'], row['invitee_id'])
             amount = fee * row['rate_percent'] // 100
-            # Unique invitee constraint is the lifetime once-only boundary.
+            # Each eligible order is settled once, even across concurrent maintenance runs.
             inserted = q.execute('INSERT INTO invitation_rewards(invitee_id,inviter_id,order_id,rate_percent,fee,granted,entitled) VALUES($1,$2,$3,$4,$5,$6,$6) ON CONFLICT DO NOTHING',
                                  row['invitee_id'],row['inviter_id'],row['order_id'],row['rate_percent'],fee,amount)
             if inserted and amount:
-                _entry(q,row['inviter_id'],amount,'invite:'+row['invitee_id'],'伙伴首笔成功订阅邀请奖励')
+                _entry(q,row['inviter_id'],amount,'invite:'+row['order_id'],'伙伴订阅邀请奖励')
 
 
 def listing(request, owner=None):
@@ -75,14 +76,18 @@ def listing(request, owner=None):
       COALESCE(sum(r.entitled),0)::bigint AS earned,
       COALESCE(sum(r.recovered),0)::bigint AS recovered,
       COALESCE(sum(r.granted-r.recovered-r.entitled),0)::bigint AS pending_recovery
-      FROM users u JOIN users i ON i.id=u.invited_by LEFT JOIN invitation_rewards r ON r.invitee_id=u.id WHERE """+where,*args)
+      FROM users u JOIN users i ON i.id=u.invited_by LEFT JOIN (SELECT invitee_id,max(rate_percent) AS rate_percent,sum(fee)::bigint AS fee,
+       sum(granted)::bigint AS granted,sum(entitled)::bigint AS entitled,sum(recovered)::bigint AS recovered,max(created_at) AS created_at
+       FROM invitation_rewards GROUP BY invitee_id) r ON r.invitee_id=u.id WHERE """+where,*args)
     email="substring(u.email from 1 for 2)||'***@'||split_part(u.email,'@',2)" if owner else 'u.email'
     inviter="NULL::text" if owner else 'i.email'
     rows=db.all(f"""SELECT u.id,{email} AS email,{inviter} AS inviter,u.created_at,
       r.rate_percent,r.fee,r.granted,r.entitled,r.recovered,r.created_at AS rewarded_at,
       CASE WHEN r.invitee_id IS NULL THEN 'waiting' WHEN r.granted-r.recovered>r.entitled THEN 'recovering'
        WHEN r.entitled=0 AND r.granted>0 THEN 'reversed' WHEN r.recovered>0 THEN 'adjusted' ELSE 'rewarded' END AS reward_state
-      FROM users u JOIN users i ON i.id=u.invited_by LEFT JOIN invitation_rewards r ON r.invitee_id=u.id
+      FROM users u JOIN users i ON i.id=u.invited_by LEFT JOIN (SELECT invitee_id,max(rate_percent) AS rate_percent,sum(fee)::bigint AS fee,
+       sum(granted)::bigint AS granted,sum(entitled)::bigint AS entitled,sum(recovered)::bigint AS recovered,max(created_at) AS created_at
+       FROM invitation_rewards GROUP BY invitee_id) r ON r.invitee_id=u.id
       WHERE {where} ORDER BY u.created_at DESC,u.id LIMIT 25 OFFSET $3""",*args,(page-1)*25)
     return {'items':rows,'stats':totals,'total':totals['invited'],'page':page,'has_more':page*25<totals['invited'],'rules':config('invites')}
 
