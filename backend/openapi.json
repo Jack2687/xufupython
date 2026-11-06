@@ -4611,7 +4611,7 @@
           },
           "country": {
             "type": "string",
-            "description": "订阅地区代码，调用 GET /api/v1/catalog，从 countries[].code 选择一个当前启用的地区。name 和 currency 仅供展示，不传入这两个字段。省略时使用 PH；如果 PH 已停用，须明确选择列表中的地区。下单后按当时的国家及币种执行，后台后续修改不影响已受理订单。",
+            "description": "订阅国家的两位大写代码。先调用 GET /api/v1/catalog，从 countries[].code 选择；对应 countries[].currency 为该地区配置的订阅结算币种。地区开放状态及可用范围可能变化，请在创建订单前读取最新目录。订单受理后保留地区与币种快照。",
             "default": "PH",
             "x-input-source": "订阅地区代码，调用 GET /api/v1/catalog，从 countries[].code 选择一个当前启用的地区。name 和 currency 仅供展示，不传入这两个字段。省略时使用 PH；如果 PH 已停用，须明确选择列表中的地区。下单后按当时的国家及币种执行，后台后续修改不影响已受理订单。",
             "x-source-operations": [
@@ -5481,7 +5481,7 @@
     {
       "field": "country",
       "source": "GET /api/v1/catalog → countries[].code",
-      "value": "例如 US；不要传地区名称或币种。",
+      "value": "将 countries[].code 原样传入；同条记录的 currency 为对应结算币种。以最新目录为准。",
       "links": [
         {
           "operationId": "get_catalog",

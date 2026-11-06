@@ -78,8 +78,8 @@ def _proxy_url_with_session(resource: dict, country: str) -> tuple[str, int]:
         return urlunsplit((p.scheme, netloc, '', '', '')), 15 * 60
 
     if vendor == 'iproyal' or (p.hostname or '').lower() == 'geo.iproyal.com':
-        if '_country-' not in password.lower():
-            password += '_country-' + country.lower()
+        password = _re.sub(r'(?i)_country-[^_]*', '', password)
+        password += '_country-' + country.lower()
         token = '_session-' + uid()[:16]
         password = _re.sub(r'(?i)_session-[^_]*', token, password) if _re.search(r'(?i)_session-', password) else password + token
         m = _re.search(r'(?i)_lifetime-([^_]+)', password)
@@ -109,23 +109,28 @@ def _proxy_url_with_session(resource: dict, country: str) -> tuple[str, int]:
 
 @trace.phase('proxy')
 def _acquire_order_proxy(order_id: str, country: str, duration_sec: int) -> str:
-    """Acquire a session-bound proxy for this order. Same order always gets same IP."""
+    """Acquire a session-bound proxy for this order. The same order always reuses its original supplier session."""
     with db.transaction() as q:
         q.execute('SELECT pg_advisory_xact_lock($1)', PROXY_LOCK)
         existing = q.one(
-            "SELECT endpoint_enc,expires_at FROM order_proxy_sessions WHERE order_id=$1 FOR UPDATE",
+            "SELECT endpoint_enc,expires_at,source_mode FROM order_proxy_sessions WHERE order_id=$1 FOR UPDATE",
             order_id
         )
+        from . import country_pool
         if existing:
+            if existing['source_mode'] != country_pool.mode(q):
+                raise country_pool.PoolError('proxy_mode_changed')
             if existing['expires_at'] > now():
                 return decrypt(existing['endpoint_enc'])
             raise RuntimeError('proxy_session_expired')
 
+        if country_pool.mode(q) == 'country_pool':
+            return country_pool.acquire_order(q, order_id, country)
         proxy_cfg = config('proxy', q)
         default_id = proxy_cfg.get('default_id', '')
         row = q.one(
             "SELECT r.id,r.endpoint_enc,r.vendor,r.ip_mode FROM resources r "
-            "WHERE r.enabled AND r.kind='proxy' AND r.country=$2 "
+            "WHERE r.enabled AND r.kind='proxy' AND (r.country=$2 OR (r.vendor='iproyal' AND r.ip_mode='dynamic')) "
             "AND (SELECT count(*) FROM proxy_leases l WHERE l.resource_id=r.id AND l.expires_at>now())<r.capacity "
             "ORDER BY (r.id=$1) DESC,(r.last_status='failed'),random()*r.weight DESC LIMIT 1",
             default_id, country
@@ -341,6 +346,10 @@ def claim_subscription():
             cfg['per_user_parallel'], list(workflows), FLOW
         )
         if not row:
+            return None
+        from . import country_pool
+        if (country_pool.mode(q)=='country_pool' and not q.scalar('SELECT order_id FROM order_proxy_sessions WHERE order_id=$1', row['id'])
+                and country_pool.active_sessions(q)>=country_pool.settings(q)['max_parallel']):
             return None
         q.execute("UPDATE orders SET status='processing',updated_at=now() WHERE id=$1", row['id'])
         row['trace_round'] = q.scalar('UPDATE subscription_runs SET trace_round=trace_round+1 WHERE order_id=$1 RETURNING trace_round', row['id'])

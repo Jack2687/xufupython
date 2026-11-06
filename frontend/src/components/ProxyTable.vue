@@ -37,9 +37,10 @@ function close(){modal.value=false;revision++;clearTimeout(poll)}
 function tone(s:string){return s==='pass'?'active':s==='fail'?'failed':'review'}
 </script>
 <template>
-<div class="panel proxy-table"><DataTable :rows="rows" :columns="[{key:'name',label:'代理名称 / 用途'},{key:'country',label:'订阅地区'},{key:'capacity',label:'占用 / 容量'},{key:'last_ip',label:'出口 IP / 地区'},{key:'quality',label:'质量评分'},{key:'openai',label:'OpenAI'},{key:'action',label:'操作'}]">
+<div class="panel proxy-table"><DataTable :rows="rows" :columns="[{key:'name',label:'代理名称 / 用途'},{key:'endpoint',label:'代理地址'},{key:'country',label:'订阅地区'},{key:'capacity',label:'占用 / 容量'},{key:'last_ip',label:'出口 IP / 地区'},{key:'quality',label:'质量评分'},{key:'openai',label:'OpenAI'},{key:'action',label:'操作'}]">
  <template #name="{row}"><b>{{row.name}}</b><small>{{({iproyal:'IPRoyal',cliproxy:'Cliproxy',other:'其他'} as Row)[row.vendor]||'其他'}} · {{row.ip_mode==='static'?'静态':'动态'}}</small><div class="proxy-flags"><span v-if="row.is_global" class="badge active"><Globe2 :size="12"/>全局代理</span><span v-if="!row.enabled" class="badge disabled">已停用</span><span v-else-if="!row.is_global" class="muted small">已启用</span></div></template>
- <template #country="{row}">{{regionLabel(row.country)}}</template>
+ <template #endpoint="{row}"><code class="proxy-endpoint">{{row.endpoint}}</code></template>
+ <template #country="{row}">{{row.vendor==='iproyal'&&row.ip_mode==='dynamic'?'按订单国家自动匹配':regionLabel(row.country)}}</template>
  <template #capacity="{row}">{{row.in_use}} / {{row.capacity}}</template>
  <template #last_ip="{row}">{{row.last_ip||'—'}}<small>{{row.last_country||'未检测'}} · {{row.last_latency_ms||0}} ms</small><small>{{labels[row.last_status]||row.last_status}} · {{date(row.last_checked)}}</small></template>
  <template #quality="{row}"><button v-if="row.quality_result?.checked_at" class="text-btn proxy-score" @click="view(row,'quality')"><b>{{row.quality_result.score??'—'}}</b><span>{{row.quality_result.grade||''}}</span></button><span v-else class="muted">未测试</span><small v-if="row.quality_result?.checked_at">{{date(row.quality_result.checked_at)}}</small></template>
@@ -58,5 +59,6 @@ function tone(s:string){return s==='pass'?'active':s==='fail'?'failed':'review'}
 </Modal>
 </template>
 <style scoped>
+.proxy-endpoint{display:block;min-width:200px;max-width:340px;overflow-wrap:anywhere;white-space:normal;font-size:12px;user-select:text}
 .proxy-flags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.proxy-flags .badge{display:inline-flex;gap:4px;align-items:center}.proxy-actions{display:flex;gap:9px 13px;flex-wrap:wrap;min-width:150px;max-width:210px}.proxy-score{display:flex;align-items:baseline;gap:8px}.proxy-score b{font-size:20px}.proxy-testing{text-align:center;padding:30px 10px}.proxy-testing svg{color:var(--accent)}.proxy-testing p{color:var(--muted);font-size:12px}.proxy-result-heading{display:flex;gap:15px;align-items:center;margin:10px 0 24px}.proxy-result-heading>svg{color:#238169}.proxy-result-heading strong{font-size:34px}.proxy-result-heading strong small{font-size:14px}.proxy-result-heading small,.proxy-result-heading p{color:var(--muted)}.proxy-result-heading p{font-size:13px;margin:5px 0}.proxy-score-parts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}.proxy-score-parts>div{padding:12px 14px;background:#f4f8f8;border-radius:8px;display:flex;justify-content:space-between;font-size:12px}.proxy-sample{display:flex;flex-wrap:wrap;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12px}.proxy-sample small{margin-left:auto;color:var(--muted)}.callout small{color:var(--muted)}
 </style>

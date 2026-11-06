@@ -277,3 +277,15 @@ BEGIN
   END IF;
  END LOOP;
 END $$;
+
+-- Country-pool bindings preserve original endpoints and expiration across retries.
+ALTER TABLE order_proxy_sessions ADD COLUMN IF NOT EXISTS source_mode text NOT NULL DEFAULT 'manual';
+ALTER TABLE order_proxy_sessions ADD COLUMN IF NOT EXISTS session_ref text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS country_pool_sessions (
+ session_id text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS renewal_proxy_sessions (
+ task_id text PRIMARY KEY REFERENCES renewal_tasks(id), endpoint_enc text NOT NULL,
+ expires_at timestamptz NOT NULL, session_ref text NOT NULL, country text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now()
+);

@@ -1,3 +1,4 @@
+import {minorAmount} from './currency.ts'
 import type {Row} from './lib'
 
 type State='completed'|'running'|'waiting'|'review'|'failed'|'skipped'
@@ -6,8 +7,9 @@ export type JourneyStage={id:string;title:string;state:State;result:string;facts
 type Input={order?:Row;payment?:Row;checkout?:Row;billing?:Row;events?:Row[];links?:Row[]}
 const validAmount=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0
 export function currencyAmount(amount:unknown,currency:unknown){
- if(!validAmount(amount)||typeof currency!=='string'||!['usd','php','jpy','sgd','gbp','egp','try'].includes(currency.toLowerCase()))return '未记录'
- return currency.toUpperCase()+' '+(Number(amount)/(currency.toLowerCase()==='jpy'?1:100)).toLocaleString('zh-CN',{minimumFractionDigits:currency.toLowerCase()==='jpy'?0:2,maximumFractionDigits:currency.toLowerCase()==='jpy'?0:2})
+ if(typeof currency!=='string')return '未记录'
+ const code=currency.toUpperCase(),formatted=minorAmount(amount,code)
+ return formatted===null?'未记录':code+' '+formatted
 }
 export function durationText(ms:number){return ms>=60000?`${Math.floor(ms/60000)} 分 ${Math.round(ms%60000/1000)} 秒`:ms>=1000?`${(ms/1000).toFixed(1)} 秒`:`${Math.round(ms)} 毫秒`}
 const time=(v:unknown)=>typeof v==='string'&&Number.isFinite(Date.parse(v))?Date.parse(v):null

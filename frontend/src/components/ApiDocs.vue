@@ -67,7 +67,7 @@ onMounted(async()=>{try{spec.value=await api('/openapi.json');await nextTick();i
       <p>可选 <code>promo_code</code> 填写用户自己的 Team 优惠码，留空则不使用。优惠码只影响上游结账金额，平台服务费仍以报价为准。无需传递团队空间名称 <code>workspace_name</code>。订阅办理和仅生成结账链接均使用这些参数；总席位不足 2 或高级席位超过总数会返回 HTTP 400，且不会受理订单或冻结费用。</p>
     </section>
     <section id="input-sources" class="panel docs-section">
-      <h2>字段来源与调用顺序</h2>
+      <h2>字段来源与调用顺序</h2><p>订阅地区：从 <code>GET /api/v1/catalog</code> 的 <code>countries[]</code> 获取国家名称、<code>code</code> 和 <code>currency</code>。下单传 <code>country = code</code>，无需传代理或币种；国家列表会随开放配置更新。订单受理后保留下单时的地区和币种，实际订阅扣款以结账结果为准。</p>
       <p>先获取需要的值，再传给下一步接口。<code>items[].id</code> 表示列表中选中的那条记录的 id；<code>id</code> 表示创建响应最外层的 id。</p>
       <div class="docs-table"><table><thead><tr><th>需要填写的字段</th><th>从哪里获取</th><th>怎样传递</th></tr></thead><tbody>
         <tr v-for="entry in spec['x-input-sources']" :key="entry.field"><td><code>{{entry.field}}</code></td><td>{{entry.source}}<div class="field-source-links"><a v-for="link in entry.links" :key="link.operationId" :href="'/docs#'+link.operationId">{{link.label}}</a></div></td><td>{{entry.value}}</td></tr>

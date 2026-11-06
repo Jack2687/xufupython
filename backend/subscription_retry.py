@@ -69,6 +69,12 @@ def handle_failure(order_id, exc):
                       "'付款请求已提交，结果尚未确认；已保留原交易，请勿再次付款。')", order_id)
             trace.record('result', 'review', 'payment_result_unconfirmed', order_id=order_id, q=q)
             return True
+        if code == 'pool_capacity' and not row['payment_submit_started_at']:
+            delay = config('scheduler', q)['retry_delay_seconds']
+            q.execute("UPDATE subscription_runs SET network_retry_at=now()+$2*interval '1 second',updated_at=now() WHERE order_id=$1", order_id, delay)
+            q.execute("UPDATE orders SET status='queued',updated_at=now() WHERE id=$1", order_id)
+            q.execute("INSERT INTO order_events(order_id,stage,message) VALUES($1,'queued','国家代理池会话已占满，等待资源后继续。')", order_id)
+            return True
         cfg = config('payment', q)
         limit = cfg.get('network_restart_limit', 2)
         if code not in NETWORK_ERRORS or row['network_retry_count'] >= limit:

@@ -6,6 +6,7 @@ from urllib.parse import urlsplit, urlunsplit, quote
 import httpx
 import httpcore
 from fastapi import APIRouter, Depends, Request
+from starlette.concurrency import run_in_threadpool
 from . import db
 from .common import *
 from .settings import COUNTRIES
@@ -56,13 +57,20 @@ def proxy_client(endpoint,timeout=8):
 
 @router.get('/resources')
 def resources():
-    return {'items':db.all('SELECT '+FIELDS+' FROM resources ORDER BY created_at')}
+    rows=db.all('SELECT '+FIELDS+',endpoint_enc FROM resources ORDER BY created_at')
+    for row in rows:row['endpoint']=decrypt(row.pop('endpoint_enc'))
+    return {'items':rows}
 
 
 @router.post('/resources')
 @router.put('/resources/{id}')
 async def save_resource(request:Request,id:str=''):
-    v=await body(request);fresh=not id;id=id or uid()
+    v=await body(request)
+    return await run_in_threadpool(save_resource_value,v,request,id)
+
+
+def save_resource_value(v,request,id=''):
+    fresh=not id;id=id or uid()
     name=v.get('name','');country=v.get('country','')
     require(isinstance(name,str) and isinstance(country,str),'资源参数无效')
     name=name.strip();country=country.strip().upper()
@@ -102,6 +110,10 @@ async def save_resource(request:Request,id:str=''):
 @router.post('/resources/{id}/global')
 async def set_global(id:str,request:Request):
     await body(request)
+    return await run_in_threadpool(set_global_value,id,request)
+
+
+def set_global_value(id,request):
     with db.transaction() as q:
         q.execute('SELECT pg_advisory_xact_lock(1886003)')
         require(q.scalar('SELECT enabled FROM resources WHERE id=$1',id),'全局代理不存在或未启用')
@@ -183,9 +195,12 @@ def acquire(q,id,seconds):
 
 @router.post('/resources/{id}/test')
 def quick_test(id:str,request:Request):
+    from .country_pool import mode
     require(limit('proxytest:'+current(request)['id'],10),'测试过于频繁',429)
     with db.transaction() as q:
-        q.execute('SELECT pg_advisory_xact_lock(1886003)');row,lease=acquire(q,id,35)
+        q.execute('SELECT pg_advisory_xact_lock(1886003)')
+        require(mode(q)=='manual','当前启用国家代理池，请在国家代理池中测试',409)
+        row,lease=acquire(q,id,35)
     sample={'ok':False,'ip':'','country':'','latency_ms':0}
     try:
         with proxy_client(decrypt(row['endpoint_enc']),15) as c: sample=probe_exit(c)
@@ -197,10 +212,18 @@ def quick_test(id:str,request:Request):
 
 @router.post('/resources/{id}/checks')
 async def start_check(id:str,request:Request):
-    v=await body(request);kind=v.get('kind');require(kind in ('quality','openai'),'请选择评分或 OpenAI 测试')
+    v=await body(request)
+    return await run_in_threadpool(start_check_value,id,request,v)
+
+
+def start_check_value(id,request,v):
+    from .country_pool import mode
+    kind=v.get('kind');require(kind in ('quality','openai'),'请选择评分或 OpenAI 测试')
     require(limit('proxytest:'+current(request)['id'],10),'测试过于频繁',429)
     with db.transaction() as q:
-        q.execute('SELECT pg_advisory_xact_lock(1886003)');require(q.scalar('SELECT id FROM resources WHERE id=$1',id),'资源不存在',404)
+        q.execute('SELECT pg_advisory_xact_lock(1886003)')
+        require(mode(q)=='manual','当前启用国家代理池，请在国家代理池中测试',409)
+        require(q.scalar('SELECT id FROM resources WHERE id=$1',id),'资源不存在',404)
         existing=q.one("SELECT id,kind FROM proxy_checks WHERE resource_id=$1 AND state IN ('queued','running')",id)
         if existing:
             require(existing['kind']==kind,'此代理已有测试在进行，请等待结果',409);return {'id':existing['id'],'replayed':True}
@@ -217,8 +240,10 @@ def check_result(id:str):
 
 
 def run_check():
+    from .country_pool import mode
     with db.transaction() as q:
         q.execute('SELECT pg_advisory_xact_lock(1886003)')
+        if mode(q)!='manual':return False
         q.execute("UPDATE proxy_checks SET state='queued',lease_token=NULL,lease_until=NULL WHERE state='running' AND lease_until<now()")
         if q.scalar("SELECT count(*) FROM proxy_checks WHERE state='running'")>=2: return False
         job=q.one("SELECT c.id,c.resource_id,c.kind FROM proxy_checks c JOIN resources r ON r.id=c.resource_id WHERE c.state='queued' AND (SELECT count(*) FROM proxy_leases l WHERE l.resource_id=r.id AND l.expires_at>now())<r.capacity ORDER BY c.created_at LIMIT 1 FOR UPDATE OF c SKIP LOCKED")

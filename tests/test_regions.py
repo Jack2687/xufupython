@@ -16,6 +16,8 @@ class RegionTests:
     def test_region_crud_permissions_defaults_and_no_seed_resurrection(self):
         with self.region_fixture(),self.api_fixture() as (_,client,_):
             self.assertEqual(client.get('/api/admin/regions').status_code,403)
+            payment=db.scalar("SELECT value FROM settings WHERE key='payment'")
+            db.execute("UPDATE settings SET value=$1 WHERE key='payment'",dict(payment,subscription_flow='cslive_go_direct_pay'))
             row={'code':'BR','name':'巴西','currency':'BRL','enabled':True,'sort':-5}
             self.ok(self.client.post('/api/admin/regions',json=row))
             self.assertEqual(self.client.post('/api/admin/regions',json=row).status_code,409)

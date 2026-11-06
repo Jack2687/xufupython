@@ -72,6 +72,9 @@ CODES = {
     'checkout_verification_failed': '提链验证未通过，请查看原始错误码',
     'checkout_program_unavailable': '提链程序不可用，请检查部署',
 }
+from .country_pool import ERRORS as POOL_ERRORS
+CODES.update(POOL_ERRORS)
+
 REQUEST_PHASES = {
     'exit_probe': 'network', 'direct_exit_probe': 'network', 'checkout_create': 'checkout', 'checkout_initialize': 'opening',
     'billing_update': 'pricing', 'payment_method_create': 'card_prepare',

@@ -1,3 +1,4 @@
+import {minorAmount} from './currency.ts'
 import {cash,type Row} from './lib'
 
 export const feeStates:Row={held:'服务费已冻结',charged:'服务费已结算',released:'服务费已解冻'}
@@ -11,8 +12,8 @@ export function upstreamAmount(p:Row={}){
  const actual=p.charged_amount!=null&&!!p.charged_currency
  const amount=actual?p.charged_amount:p.amount,currency=String(actual?p.charged_currency:p.currency||'').toUpperCase()
  if(amount==null||!currency)return {value:'—',label:'金额尚未记录',actual:false}
- const digits=currency==='JPY'?0:2
- return {value:`${(Number(amount)/(digits?100:1)).toLocaleString('zh-CN',{minimumFractionDigits:digits,maximumFractionDigits:digits})} ${currency}`,label:actual?'订单已确认扣款':'含税报价',actual}
+ const formatted=minorAmount(Number(amount),currency)
+ return {value:formatted===null?'—':`${formatted} ${currency}`,label:actual?'订单已确认扣款':'含税报价',actual}
 }
 export function discountText(o:Row){
  const s=o.price_snapshot||{}

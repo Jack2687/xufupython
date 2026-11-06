@@ -5,7 +5,7 @@ from http.cookies import SimpleCookie
 from urllib.parse import quote
 import httpx
 from fastapi import APIRouter,Depends,Request
-from . import db
+from . import db, country_pool
 from .common import *
 from . import customer_contract
 from .proxies import proxy_client,acquire
@@ -200,9 +200,21 @@ def run_task(job,client_factory=proxy_client):
         try:
             with db.transaction() as q:
                 q.execute('SELECT pg_advisory_xact_lock(1886003)')
-                resource=q.scalar("SELECT r.id FROM resources r JOIN settings s ON s.key='proxy' AND r.id=s.value->>'global_id' WHERE r.enabled")
-                require(resource,'全局代理不可用',409);row,lease=acquire(q,resource,110)
-            client=client_factory(decrypt(row['endpoint_enc']),20)
+                if country_pool.mode(q)=='country_pool':
+                    endpoint=country_pool.acquire_renewal(q,id)
+                else:
+                    if q.scalar('SELECT task_id FROM renewal_proxy_sessions WHERE task_id=$1',id):
+                        raise country_pool.PoolError('proxy_mode_changed')
+                    resource=q.scalar("SELECT r.id FROM resources r JOIN settings s ON s.key='proxy' AND r.id=s.value->>'global_id' WHERE r.enabled")
+                    require(resource,'全局代理不可用',409);row,lease=acquire(q,resource,110)
+                    endpoint=decrypt(row['endpoint_enc'])
+            client=client_factory(endpoint,20)
+        except country_pool.PoolError as exc:
+            if str(exc) in ('proxy_session_expired','proxy_mode_changed'):
+                db.execute("UPDATE renewal_tasks SET status='review',message=$3,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2",id,token,country_pool.ERRORS[str(exc)])
+                return
+            db.execute("UPDATE renewal_tasks SET status='queued',message=$3,checks=GREATEST(checks-1,0),next_at=now()+$4*interval '1 second',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2",id,token,country_pool.ERRORS[str(exc)],cfg['renewal_check_interval_seconds'])
+            return
         except Exception:
             if lease:db.execute('DELETE FROM proxy_leases WHERE id=$1',lease)
             db.execute("UPDATE renewal_tasks SET status='queued',message='等待办理资源，稍后自动重试。',checks=GREATEST(checks-1,0),next_at=now()+$3*interval '1 second',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2",id,token,cfg['renewal_check_interval_seconds'])

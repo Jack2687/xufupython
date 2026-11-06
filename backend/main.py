@@ -14,7 +14,7 @@ from . import db,auth,membership,wallet,admin_accounts,settings,proxies,records,
 from .common import *
 from .seed import seed
 from .runtime import worker_mode
-from . import customer_api, admin_orders, order_updates, invitations, email_auth, features, custom_menus, branding, regions
+from . import customer_api, admin_orders, order_updates, invitations, email_auth, features, custom_menus, branding, regions, country_pool
 from .request_origin import configured_origin, origin_allowed
 from .auth_runtime import bounded_call
 from starlette.concurrency import run_in_threadpool
@@ -46,17 +46,19 @@ def maintenance():
 
 def worker_loop(stop):
     executor=ThreadPoolExecutor(max_workers=30,thread_name_prefix='xufu-worker')
-    proxy_jobs=set();renewal_jobs=set();subscription_jobs=set();cslive_go_jobs=set();cslive_full_jobs=set();last_maintenance=0
+    sync_jobs=set();proxy_jobs=set();renewal_jobs=set();subscription_jobs=set();cslive_go_jobs=set();cslive_full_jobs=set();last_maintenance=0
     try:
         while not stop.wait(1):
-            for group in (proxy_jobs,renewal_jobs,subscription_jobs,cslive_go_jobs,cslive_full_jobs):
+            for group in (sync_jobs,proxy_jobs,renewal_jobs,subscription_jobs,cslive_go_jobs,cslive_full_jobs):
                 for future in list(group):
                     if future.done():
                         try:future.result()
                         except Exception as e:log.error('Background operation failed (%s)',type(e).__name__)
                         group.remove(future)
             try:
-                if time.monotonic()-last_maintenance>60:maintenance();last_maintenance=time.monotonic()
+                if time.monotonic()-last_maintenance>60:
+                    maintenance();last_maintenance=time.monotonic()
+                    if not sync_jobs:sync_jobs.add(executor.submit(country_pool.auto_sync))
                 if len(proxy_jobs)<2:proxy_jobs.add(executor.submit(proxies.run_check))
                 if worker_mode()=='all':
                     if len(renewal_jobs)<20:
@@ -131,7 +133,7 @@ def check_source(request):
 
 
 for module in (auth,email_auth,membership,wallet,admin_accounts,settings,proxies,admin_content,renewals,subscription,subscription_cslive_go,subscription_cslive_full):app.include_router(module.router)
-for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router,order_updates.router,invitations.router,custom_menus.router,branding.router,regions.router):app.include_router(router)
+for router in (records.public_router,records.router,records.admin_router,customer_api.router,admin_orders.router,order_updates.router,invitations.router,custom_menus.router,branding.router,regions.router,country_pool.router):app.include_router(router)
 
 
 @app.get('/health/live')

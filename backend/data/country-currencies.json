@@ -1,0 +1,1247 @@
+{
+  "source": "https://gptpay.cmsnav.com/?view=recharge",
+  "retrieved_at": "2026-11-06T01:51:58.124Z",
+  "description": "Reference catalog configuration; not proof of upstream payment availability.",
+  "countries": [
+    {
+      "code": "AD",
+      "currency": "EUR",
+      "name": "安道尔"
+    },
+    {
+      "code": "AE",
+      "currency": "AED",
+      "name": "阿联酋"
+    },
+    {
+      "code": "AF",
+      "currency": "AFN",
+      "name": "阿富汗"
+    },
+    {
+      "code": "AG",
+      "currency": "XCD",
+      "name": "安提瓜和巴布达"
+    },
+    {
+      "code": "AI",
+      "currency": "XCD",
+      "name": "安圭拉"
+    },
+    {
+      "code": "AL",
+      "currency": "ALL",
+      "name": "阿尔巴尼亚"
+    },
+    {
+      "code": "AM",
+      "currency": "AMD",
+      "name": "亚美尼亚"
+    },
+    {
+      "code": "AO",
+      "currency": "AOA",
+      "name": "安哥拉"
+    },
+    {
+      "code": "AR",
+      "currency": "ARS",
+      "name": "阿根廷"
+    },
+    {
+      "code": "AS",
+      "currency": "USD",
+      "name": "美属萨摩亚"
+    },
+    {
+      "code": "AT",
+      "currency": "EUR",
+      "name": "奥地利"
+    },
+    {
+      "code": "AU",
+      "currency": "AUD",
+      "name": "澳大利亚"
+    },
+    {
+      "code": "AW",
+      "currency": "AWG",
+      "name": "阿鲁巴"
+    },
+    {
+      "code": "AX",
+      "currency": "EUR",
+      "name": "奥兰群岛"
+    },
+    {
+      "code": "AZ",
+      "currency": "AZN",
+      "name": "阿塞拜疆"
+    },
+    {
+      "code": "BA",
+      "currency": "BAM",
+      "name": "波斯尼亚和黑塞哥维那"
+    },
+    {
+      "code": "BB",
+      "currency": "BBD",
+      "name": "巴巴多斯"
+    },
+    {
+      "code": "BD",
+      "currency": "BDT",
+      "name": "孟加拉国"
+    },
+    {
+      "code": "BE",
+      "currency": "EUR",
+      "name": "比利时"
+    },
+    {
+      "code": "BF",
+      "currency": "XOF",
+      "name": "布基纳法索"
+    },
+    {
+      "code": "BG",
+      "currency": "BGN",
+      "name": "保加利亚"
+    },
+    {
+      "code": "BH",
+      "currency": "BHD",
+      "name": "巴林"
+    },
+    {
+      "code": "BI",
+      "currency": "BIF",
+      "name": "布隆迪"
+    },
+    {
+      "code": "BJ",
+      "currency": "XOF",
+      "name": "贝宁"
+    },
+    {
+      "code": "BL",
+      "currency": "EUR",
+      "name": "圣巴泰勒米"
+    },
+    {
+      "code": "BM",
+      "currency": "BMD",
+      "name": "百慕大"
+    },
+    {
+      "code": "BN",
+      "currency": "BND",
+      "name": "文莱"
+    },
+    {
+      "code": "BO",
+      "currency": "BOB",
+      "name": "玻利维亚"
+    },
+    {
+      "code": "BQ",
+      "currency": "USD",
+      "name": "荷兰加勒比区"
+    },
+    {
+      "code": "BR",
+      "currency": "BRL",
+      "name": "巴西"
+    },
+    {
+      "code": "BS",
+      "currency": "BSD",
+      "name": "巴哈马"
+    },
+    {
+      "code": "BT",
+      "currency": "BTN",
+      "name": "不丹"
+    },
+    {
+      "code": "BV",
+      "currency": "NOK",
+      "name": "布韦岛"
+    },
+    {
+      "code": "BW",
+      "currency": "BWP",
+      "name": "博茨瓦纳"
+    },
+    {
+      "code": "BY",
+      "currency": "BYN",
+      "name": "白俄罗斯"
+    },
+    {
+      "code": "BZ",
+      "currency": "BZD",
+      "name": "伯利兹"
+    },
+    {
+      "code": "CA",
+      "currency": "CAD",
+      "name": "加拿大"
+    },
+    {
+      "code": "CC",
+      "currency": "AUD",
+      "name": "科科斯群岛"
+    },
+    {
+      "code": "CD",
+      "currency": "CDF",
+      "name": "刚果民主共和国"
+    },
+    {
+      "code": "CF",
+      "currency": "XAF",
+      "name": "中非共和国"
+    },
+    {
+      "code": "CG",
+      "currency": "XAF",
+      "name": "刚果共和国"
+    },
+    {
+      "code": "CH",
+      "currency": "CHF",
+      "name": "瑞士"
+    },
+    {
+      "code": "CI",
+      "currency": "XOF",
+      "name": "科特迪瓦"
+    },
+    {
+      "code": "CK",
+      "currency": "NZD",
+      "name": "库克群岛"
+    },
+    {
+      "code": "CL",
+      "currency": "CLP",
+      "name": "智利"
+    },
+    {
+      "code": "CM",
+      "currency": "XAF",
+      "name": "喀麦隆"
+    },
+    {
+      "code": "CN",
+      "currency": "CNY",
+      "name": "中国"
+    },
+    {
+      "code": "CO",
+      "currency": "COP",
+      "name": "哥伦比亚"
+    },
+    {
+      "code": "CR",
+      "currency": "CRC",
+      "name": "哥斯达黎加"
+    },
+    {
+      "code": "CU",
+      "currency": "CUP",
+      "name": "古巴"
+    },
+    {
+      "code": "CV",
+      "currency": "CVE",
+      "name": "佛得角"
+    },
+    {
+      "code": "CW",
+      "currency": "ANG",
+      "name": "库拉索"
+    },
+    {
+      "code": "CX",
+      "currency": "AUD",
+      "name": "圣诞岛"
+    },
+    {
+      "code": "CY",
+      "currency": "EUR",
+      "name": "塞浦路斯"
+    },
+    {
+      "code": "CZ",
+      "currency": "CZK",
+      "name": "捷克"
+    },
+    {
+      "code": "DE",
+      "currency": "EUR",
+      "name": "德国"
+    },
+    {
+      "code": "DJ",
+      "currency": "DJF",
+      "name": "吉布提"
+    },
+    {
+      "code": "DK",
+      "currency": "DKK",
+      "name": "丹麦"
+    },
+    {
+      "code": "DM",
+      "currency": "XCD",
+      "name": "多米尼克"
+    },
+    {
+      "code": "DO",
+      "currency": "DOP",
+      "name": "多米尼加共和国"
+    },
+    {
+      "code": "DZ",
+      "currency": "DZD",
+      "name": "阿尔及利亚"
+    },
+    {
+      "code": "EC",
+      "currency": "USD",
+      "name": "厄瓜多尔"
+    },
+    {
+      "code": "EE",
+      "currency": "EUR",
+      "name": "爱沙尼亚"
+    },
+    {
+      "code": "EG",
+      "currency": "EGP",
+      "name": "埃及"
+    },
+    {
+      "code": "EH",
+      "currency": "MAD",
+      "name": "西撒哈拉"
+    },
+    {
+      "code": "ER",
+      "currency": "ERN",
+      "name": "厄立特里亚"
+    },
+    {
+      "code": "ES",
+      "currency": "EUR",
+      "name": "西班牙"
+    },
+    {
+      "code": "ET",
+      "currency": "ETB",
+      "name": "埃塞俄比亚"
+    },
+    {
+      "code": "FI",
+      "currency": "EUR",
+      "name": "芬兰"
+    },
+    {
+      "code": "FJ",
+      "currency": "FJD",
+      "name": "斐济"
+    },
+    {
+      "code": "FK",
+      "currency": "FKP",
+      "name": "福克兰群岛"
+    },
+    {
+      "code": "FM",
+      "currency": "USD",
+      "name": "密克罗尼西亚"
+    },
+    {
+      "code": "FO",
+      "currency": "DKK",
+      "name": "法罗群岛"
+    },
+    {
+      "code": "FR",
+      "currency": "EUR",
+      "name": "法国"
+    },
+    {
+      "code": "GA",
+      "currency": "XAF",
+      "name": "加蓬"
+    },
+    {
+      "code": "GB",
+      "currency": "GBP",
+      "name": "英国"
+    },
+    {
+      "code": "GD",
+      "currency": "XCD",
+      "name": "格林纳达"
+    },
+    {
+      "code": "GE",
+      "currency": "GEL",
+      "name": "格鲁吉亚"
+    },
+    {
+      "code": "GF",
+      "currency": "EUR",
+      "name": "法属圭亚那"
+    },
+    {
+      "code": "GG",
+      "currency": "GBP",
+      "name": "根西岛"
+    },
+    {
+      "code": "GH",
+      "currency": "GHS",
+      "name": "加纳"
+    },
+    {
+      "code": "GI",
+      "currency": "GIP",
+      "name": "直布罗陀"
+    },
+    {
+      "code": "GL",
+      "currency": "DKK",
+      "name": "格陵兰"
+    },
+    {
+      "code": "GM",
+      "currency": "GMD",
+      "name": "冈比亚"
+    },
+    {
+      "code": "GN",
+      "currency": "GNF",
+      "name": "几内亚"
+    },
+    {
+      "code": "GP",
+      "currency": "EUR",
+      "name": "瓜德罗普"
+    },
+    {
+      "code": "GQ",
+      "currency": "XAF",
+      "name": "赤道几内亚"
+    },
+    {
+      "code": "GR",
+      "currency": "EUR",
+      "name": "希腊"
+    },
+    {
+      "code": "GS",
+      "currency": "GBP",
+      "name": "南乔治亚和南桑威奇群岛"
+    },
+    {
+      "code": "GT",
+      "currency": "GTQ",
+      "name": "危地马拉"
+    },
+    {
+      "code": "GU",
+      "currency": "USD",
+      "name": "关岛"
+    },
+    {
+      "code": "GW",
+      "currency": "XOF",
+      "name": "几内亚比绍"
+    },
+    {
+      "code": "GY",
+      "currency": "GYD",
+      "name": "圭亚那"
+    },
+    {
+      "code": "HK",
+      "currency": "HKD",
+      "name": "中国香港"
+    },
+    {
+      "code": "HM",
+      "currency": "AUD",
+      "name": "赫德岛和麦克唐纳群岛"
+    },
+    {
+      "code": "HN",
+      "currency": "HNL",
+      "name": "洪都拉斯"
+    },
+    {
+      "code": "HR",
+      "currency": "EUR",
+      "name": "克罗地亚"
+    },
+    {
+      "code": "HT",
+      "currency": "HTG",
+      "name": "海地"
+    },
+    {
+      "code": "HU",
+      "currency": "HUF",
+      "name": "匈牙利"
+    },
+    {
+      "code": "ID",
+      "currency": "IDR",
+      "name": "印度尼西亚"
+    },
+    {
+      "code": "IE",
+      "currency": "EUR",
+      "name": "爱尔兰"
+    },
+    {
+      "code": "IL",
+      "currency": "ILS",
+      "name": "以色列"
+    },
+    {
+      "code": "IM",
+      "currency": "GBP",
+      "name": "马恩岛"
+    },
+    {
+      "code": "IN",
+      "currency": "INR",
+      "name": "印度"
+    },
+    {
+      "code": "IO",
+      "currency": "USD",
+      "name": "英属印度洋领地"
+    },
+    {
+      "code": "IQ",
+      "currency": "IQD",
+      "name": "伊拉克"
+    },
+    {
+      "code": "IR",
+      "currency": "IRR",
+      "name": "伊朗"
+    },
+    {
+      "code": "IS",
+      "currency": "ISK",
+      "name": "冰岛"
+    },
+    {
+      "code": "IT",
+      "currency": "EUR",
+      "name": "意大利"
+    },
+    {
+      "code": "JE",
+      "currency": "GBP",
+      "name": "泽西岛"
+    },
+    {
+      "code": "JM",
+      "currency": "JMD",
+      "name": "牙买加"
+    },
+    {
+      "code": "JO",
+      "currency": "JOD",
+      "name": "约旦"
+    },
+    {
+      "code": "JP",
+      "currency": "JPY",
+      "name": "日本"
+    },
+    {
+      "code": "KE",
+      "currency": "KES",
+      "name": "肯尼亚"
+    },
+    {
+      "code": "KG",
+      "currency": "KGS",
+      "name": "吉尔吉斯斯坦"
+    },
+    {
+      "code": "KH",
+      "currency": "KHR",
+      "name": "柬埔寨"
+    },
+    {
+      "code": "KI",
+      "currency": "AUD",
+      "name": "基里巴斯"
+    },
+    {
+      "code": "KM",
+      "currency": "KMF",
+      "name": "科摩罗"
+    },
+    {
+      "code": "KN",
+      "currency": "XCD",
+      "name": "圣基茨和尼维斯"
+    },
+    {
+      "code": "KP",
+      "currency": "KPW",
+      "name": "朝鲜"
+    },
+    {
+      "code": "KR",
+      "currency": "KRW",
+      "name": "韩国"
+    },
+    {
+      "code": "KW",
+      "currency": "KWD",
+      "name": "科威特"
+    },
+    {
+      "code": "KY",
+      "currency": "KYD",
+      "name": "开曼群岛"
+    },
+    {
+      "code": "KZ",
+      "currency": "KZT",
+      "name": "哈萨克斯坦"
+    },
+    {
+      "code": "LA",
+      "currency": "LAK",
+      "name": "老挝"
+    },
+    {
+      "code": "LB",
+      "currency": "LBP",
+      "name": "黎巴嫩"
+    },
+    {
+      "code": "LC",
+      "currency": "XCD",
+      "name": "圣卢西亚"
+    },
+    {
+      "code": "LI",
+      "currency": "CHF",
+      "name": "列支敦士登"
+    },
+    {
+      "code": "LK",
+      "currency": "LKR",
+      "name": "斯里兰卡"
+    },
+    {
+      "code": "LR",
+      "currency": "LRD",
+      "name": "利比里亚"
+    },
+    {
+      "code": "LS",
+      "currency": "LSL",
+      "name": "莱索托"
+    },
+    {
+      "code": "LT",
+      "currency": "EUR",
+      "name": "立陶宛"
+    },
+    {
+      "code": "LU",
+      "currency": "EUR",
+      "name": "卢森堡"
+    },
+    {
+      "code": "LV",
+      "currency": "EUR",
+      "name": "拉脱维亚"
+    },
+    {
+      "code": "LY",
+      "currency": "LYD",
+      "name": "利比亚"
+    },
+    {
+      "code": "MA",
+      "currency": "MAD",
+      "name": "摩洛哥"
+    },
+    {
+      "code": "MC",
+      "currency": "EUR",
+      "name": "摩纳哥"
+    },
+    {
+      "code": "MD",
+      "currency": "MDL",
+      "name": "摩尔多瓦"
+    },
+    {
+      "code": "ME",
+      "currency": "EUR",
+      "name": "黑山"
+    },
+    {
+      "code": "MF",
+      "currency": "EUR",
+      "name": "法属圣马丁"
+    },
+    {
+      "code": "MG",
+      "currency": "MGA",
+      "name": "马达加斯加"
+    },
+    {
+      "code": "MH",
+      "currency": "USD",
+      "name": "马绍尔群岛"
+    },
+    {
+      "code": "MK",
+      "currency": "MKD",
+      "name": "北马其顿"
+    },
+    {
+      "code": "ML",
+      "currency": "XOF",
+      "name": "马里"
+    },
+    {
+      "code": "MM",
+      "currency": "MMK",
+      "name": "缅甸"
+    },
+    {
+      "code": "MN",
+      "currency": "MNT",
+      "name": "蒙古"
+    },
+    {
+      "code": "MO",
+      "currency": "MOP",
+      "name": "中国澳门"
+    },
+    {
+      "code": "MP",
+      "currency": "USD",
+      "name": "北马里亚纳群岛"
+    },
+    {
+      "code": "MQ",
+      "currency": "EUR",
+      "name": "马提尼克"
+    },
+    {
+      "code": "MR",
+      "currency": "MRU",
+      "name": "毛里塔尼亚"
+    },
+    {
+      "code": "MS",
+      "currency": "XCD",
+      "name": "蒙特塞拉特"
+    },
+    {
+      "code": "MT",
+      "currency": "EUR",
+      "name": "马耳他"
+    },
+    {
+      "code": "MU",
+      "currency": "MUR",
+      "name": "毛里求斯"
+    },
+    {
+      "code": "MV",
+      "currency": "MVR",
+      "name": "马尔代夫"
+    },
+    {
+      "code": "MW",
+      "currency": "MWK",
+      "name": "马拉维"
+    },
+    {
+      "code": "MX",
+      "currency": "MXN",
+      "name": "墨西哥"
+    },
+    {
+      "code": "MY",
+      "currency": "MYR",
+      "name": "马来西亚"
+    },
+    {
+      "code": "MZ",
+      "currency": "MZN",
+      "name": "莫桑比克"
+    },
+    {
+      "code": "NA",
+      "currency": "NAD",
+      "name": "纳米比亚"
+    },
+    {
+      "code": "NC",
+      "currency": "XPF",
+      "name": "新喀里多尼亚"
+    },
+    {
+      "code": "NE",
+      "currency": "XOF",
+      "name": "尼日尔"
+    },
+    {
+      "code": "NF",
+      "currency": "AUD",
+      "name": "诺福克岛"
+    },
+    {
+      "code": "NG",
+      "currency": "NGN",
+      "name": "尼日利亚"
+    },
+    {
+      "code": "NI",
+      "currency": "NIO",
+      "name": "尼加拉瓜"
+    },
+    {
+      "code": "NL",
+      "currency": "EUR",
+      "name": "荷兰"
+    },
+    {
+      "code": "NO",
+      "currency": "NOK",
+      "name": "挪威"
+    },
+    {
+      "code": "NP",
+      "currency": "NPR",
+      "name": "尼泊尔"
+    },
+    {
+      "code": "NR",
+      "currency": "AUD",
+      "name": "瑙鲁"
+    },
+    {
+      "code": "NU",
+      "currency": "NZD",
+      "name": "纽埃"
+    },
+    {
+      "code": "NZ",
+      "currency": "NZD",
+      "name": "新西兰"
+    },
+    {
+      "code": "OM",
+      "currency": "OMR",
+      "name": "阿曼"
+    },
+    {
+      "code": "PA",
+      "currency": "PAB",
+      "name": "巴拿马"
+    },
+    {
+      "code": "PE",
+      "currency": "PEN",
+      "name": "秘鲁"
+    },
+    {
+      "code": "PF",
+      "currency": "XPF",
+      "name": "法属波利尼西亚"
+    },
+    {
+      "code": "PG",
+      "currency": "PGK",
+      "name": "巴布亚新几内亚"
+    },
+    {
+      "code": "PH",
+      "currency": "PHP",
+      "name": "菲律宾"
+    },
+    {
+      "code": "PK",
+      "currency": "PKR",
+      "name": "巴基斯坦"
+    },
+    {
+      "code": "PL",
+      "currency": "PLN",
+      "name": "波兰"
+    },
+    {
+      "code": "PM",
+      "currency": "EUR",
+      "name": "圣皮埃尔和密克隆"
+    },
+    {
+      "code": "PN",
+      "currency": "NZD",
+      "name": "皮特凯恩群岛"
+    },
+    {
+      "code": "PR",
+      "currency": "USD",
+      "name": "波多黎各"
+    },
+    {
+      "code": "PS",
+      "currency": "ILS",
+      "name": "巴勒斯坦"
+    },
+    {
+      "code": "PT",
+      "currency": "EUR",
+      "name": "葡萄牙"
+    },
+    {
+      "code": "PW",
+      "currency": "USD",
+      "name": "帕劳"
+    },
+    {
+      "code": "PY",
+      "currency": "PYG",
+      "name": "巴拉圭"
+    },
+    {
+      "code": "QA",
+      "currency": "QAR",
+      "name": "卡塔尔"
+    },
+    {
+      "code": "RE",
+      "currency": "EUR",
+      "name": "留尼汪"
+    },
+    {
+      "code": "RO",
+      "currency": "RON",
+      "name": "罗马尼亚"
+    },
+    {
+      "code": "RS",
+      "currency": "RSD",
+      "name": "塞尔维亚"
+    },
+    {
+      "code": "RU",
+      "currency": "RUB",
+      "name": "俄罗斯"
+    },
+    {
+      "code": "RW",
+      "currency": "RWF",
+      "name": "卢旺达"
+    },
+    {
+      "code": "SA",
+      "currency": "SAR",
+      "name": "沙特阿拉伯"
+    },
+    {
+      "code": "SB",
+      "currency": "SBD",
+      "name": "所罗门群岛"
+    },
+    {
+      "code": "SC",
+      "currency": "SCR",
+      "name": "塞舌尔"
+    },
+    {
+      "code": "SD",
+      "currency": "SDG",
+      "name": "苏丹"
+    },
+    {
+      "code": "SE",
+      "currency": "SEK",
+      "name": "瑞典"
+    },
+    {
+      "code": "SG",
+      "currency": "SGD",
+      "name": "新加坡"
+    },
+    {
+      "code": "SH",
+      "currency": "SHP",
+      "name": "圣赫勒拿"
+    },
+    {
+      "code": "SI",
+      "currency": "EUR",
+      "name": "斯洛文尼亚"
+    },
+    {
+      "code": "SJ",
+      "currency": "NOK",
+      "name": "斯瓦尔巴和扬马延"
+    },
+    {
+      "code": "SK",
+      "currency": "EUR",
+      "name": "斯洛伐克"
+    },
+    {
+      "code": "SL",
+      "currency": "SLE",
+      "name": "塞拉利昂"
+    },
+    {
+      "code": "SM",
+      "currency": "EUR",
+      "name": "圣马力诺"
+    },
+    {
+      "code": "SN",
+      "currency": "XOF",
+      "name": "塞内加尔"
+    },
+    {
+      "code": "SO",
+      "currency": "SOS",
+      "name": "索马里"
+    },
+    {
+      "code": "SR",
+      "currency": "SRD",
+      "name": "苏里南"
+    },
+    {
+      "code": "SS",
+      "currency": "SSP",
+      "name": "南苏丹"
+    },
+    {
+      "code": "ST",
+      "currency": "STN",
+      "name": "圣多美和普林西比"
+    },
+    {
+      "code": "SV",
+      "currency": "USD",
+      "name": "萨尔瓦多"
+    },
+    {
+      "code": "SX",
+      "currency": "ANG",
+      "name": "荷属圣马丁"
+    },
+    {
+      "code": "SY",
+      "currency": "SYP",
+      "name": "叙利亚"
+    },
+    {
+      "code": "SZ",
+      "currency": "SZL",
+      "name": "斯威士兰"
+    },
+    {
+      "code": "TC",
+      "currency": "USD",
+      "name": "特克斯和凯科斯群岛"
+    },
+    {
+      "code": "TD",
+      "currency": "XAF",
+      "name": "乍得"
+    },
+    {
+      "code": "TF",
+      "currency": "EUR",
+      "name": "法属南部领地"
+    },
+    {
+      "code": "TG",
+      "currency": "XOF",
+      "name": "多哥"
+    },
+    {
+      "code": "TH",
+      "currency": "THB",
+      "name": "泰国"
+    },
+    {
+      "code": "TJ",
+      "currency": "TJS",
+      "name": "塔吉克斯坦"
+    },
+    {
+      "code": "TK",
+      "currency": "NZD",
+      "name": "托克劳"
+    },
+    {
+      "code": "TL",
+      "currency": "USD",
+      "name": "东帝汶"
+    },
+    {
+      "code": "TM",
+      "currency": "TMT",
+      "name": "土库曼斯坦"
+    },
+    {
+      "code": "TN",
+      "currency": "TND",
+      "name": "突尼斯"
+    },
+    {
+      "code": "TO",
+      "currency": "TOP",
+      "name": "汤加"
+    },
+    {
+      "code": "TR",
+      "currency": "TRY",
+      "name": "土耳其"
+    },
+    {
+      "code": "TT",
+      "currency": "TTD",
+      "name": "特立尼达和多巴哥"
+    },
+    {
+      "code": "TV",
+      "currency": "AUD",
+      "name": "图瓦卢"
+    },
+    {
+      "code": "TW",
+      "currency": "TWD",
+      "name": "中国台湾"
+    },
+    {
+      "code": "TZ",
+      "currency": "TZS",
+      "name": "坦桑尼亚"
+    },
+    {
+      "code": "UA",
+      "currency": "UAH",
+      "name": "乌克兰"
+    },
+    {
+      "code": "UG",
+      "currency": "UGX",
+      "name": "乌干达"
+    },
+    {
+      "code": "UM",
+      "currency": "USD",
+      "name": "美国本土外小岛屿"
+    },
+    {
+      "code": "US",
+      "currency": "USD",
+      "name": "美国"
+    },
+    {
+      "code": "UY",
+      "currency": "UYU",
+      "name": "乌拉圭"
+    },
+    {
+      "code": "UZ",
+      "currency": "UZS",
+      "name": "乌兹别克斯坦"
+    },
+    {
+      "code": "VA",
+      "currency": "EUR",
+      "name": "梵蒂冈"
+    },
+    {
+      "code": "VC",
+      "currency": "XCD",
+      "name": "圣文森特和格林纳丁斯"
+    },
+    {
+      "code": "VE",
+      "currency": "VES",
+      "name": "委内瑞拉"
+    },
+    {
+      "code": "VG",
+      "currency": "USD",
+      "name": "英属维尔京群岛"
+    },
+    {
+      "code": "VI",
+      "currency": "USD",
+      "name": "美属维尔京群岛"
+    },
+    {
+      "code": "VN",
+      "currency": "VND",
+      "name": "越南"
+    },
+    {
+      "code": "VU",
+      "currency": "VUV",
+      "name": "瓦努阿图"
+    },
+    {
+      "code": "WF",
+      "currency": "XPF",
+      "name": "瓦利斯和富图纳"
+    },
+    {
+      "code": "WS",
+      "currency": "WST",
+      "name": "萨摩亚"
+    },
+    {
+      "code": "YE",
+      "currency": "YER",
+      "name": "也门"
+    },
+    {
+      "code": "YT",
+      "currency": "EUR",
+      "name": "马约特"
+    },
+    {
+      "code": "ZA",
+      "currency": "ZAR",
+      "name": "南非"
+    },
+    {
+      "code": "ZM",
+      "currency": "ZMW",
+      "name": "赞比亚"
+    },
+    {
+      "code": "ZW",
+      "currency": "ZWL",
+      "name": "津巴布韦"
+    }
+  ]
+}

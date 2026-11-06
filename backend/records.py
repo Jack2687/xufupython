@@ -226,7 +226,8 @@ def admin_detail(id:str):
             checkout_links=_saved_checkout_links(id,sr,checkout)
     closures=db.all('SELECT c.reason,c.prior_status,c.prior_payment_state,c.payment_submitted,c.created_at,u.email AS actor FROM order_closures c JOIN users u ON u.id=c.actor_id WHERE c.order_id=$1 ORDER BY c.created_at',id)
     if closures and payment:payment['error_code']='admin_closed'
-    return {'closures':closures,'order':row,**_order_history(id,technical=True),'checkout':checkout,'checkout_links':checkout_links,'payment':payment,'billing':billing,'ledger':db.all('SELECT kind,amount,balance_after,frozen_after,description,created_at FROM ledger WHERE order_id=$1 ORDER BY id',id)}
+    from .country_pool import order_metadata
+    return {'proxy':order_metadata(id),'closures':closures,'order':row,**_order_history(id,technical=True),'checkout':checkout,'checkout_links':checkout_links,'payment':payment,'billing':billing,'ledger':db.all('SELECT kind,amount,balance_after,frozen_after,description,created_at FROM ledger WHERE order_id=$1 ORDER BY id',id)}
 
 
 @admin_router.patch('/orders/{id}')

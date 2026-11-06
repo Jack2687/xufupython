@@ -1,6 +1,7 @@
 import secrets
 from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, Request
+from starlette.concurrency import run_in_threadpool
 from . import db
 from .common import *
 from .seed import DEFAULTS
@@ -18,14 +19,14 @@ RANGES = {
  'proxy': {'request_timeout_seconds':(10,120)}, 'site': {'invite_rate':(0,0)}
 }
 RANGES['payment']['post_payment_delay_seconds'] = (0,MAX_SECONDS)
-OPTIONAL = {'site': {'icon'}, 'proxy': {'global_id'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds','cslive_go_visit_return','cslive_go_refresh_before_renewal'}}
+OPTIONAL = {'site': {'icon'}, 'proxy': {'global_id','mode'}, 'payment': {'checkout_flow','subscription_flow','checkout_type','checkout_types','network_restart_limit','post_payment_delay_seconds','cslive_go_visit_return','cslive_go_refresh_before_renewal'}}
 
 
 def validate_config(key, v):
     require(key in DEFAULTS, '不支持的配置组')
     if key=='regions':
         from .regions import validate
-        require(isinstance(v,dict) and set(v)=={'items'} and isinstance(v['items'],list) and len(v['items'])<=250,'地区配置无效')
+        require(isinstance(v,dict) and set(v)=={'items'} and isinstance(v['items'],list) and len(v['items'])<=300,'地区配置无效')
         v['items']=[validate(row) for row in v['items']]
         require(len({r['code'] for r in v['items']})==len(v['items']),'地区代码重复')
         return
@@ -81,6 +82,7 @@ def validate_config(key, v):
                     and supported-{'promax'} <= set(v['checkout_types']) <= supported
                     and all(t in ('hosted','oaics') for t in v['checkout_types'].values()),'请为每个套餐选择链接类型')
     if key=='proxy':
+        require(v.get('mode','manual') in ('manual','country_pool'),'代理模式无效')
         require(v['match_country'] is True,'代理必须按订阅地区自动匹配')
         for name in ('default_id','global_id'):
             if name in v: require(0<=length(v[name])<=64,'代理标识无效')
@@ -123,6 +125,8 @@ def validate_config(key, v):
 @router.get('/settings')
 def settings():
     result = {r['key']:r['value'] for r in db.all('SELECT key,value FROM settings ORDER BY key')}
+    result.pop('country_pool',None)
+    result['proxy'].setdefault('mode','manual')
     result['payment'].setdefault('post_payment_delay_seconds', DEFAULT_SECONDS)
     if result['payment'].get('subscription_flow') == 'cslive_go_direct_pay':
         result['payment'].setdefault('checkout_types',dict(DEFAULTS['payment']['checkout_types'])).setdefault('promax','hosted')
@@ -136,12 +140,24 @@ def settings():
 
 @router.put('/settings/{key}')
 async def save_settings(key:str,request:Request):
-    v=await body(request);validate_config(key,v)
+    v=await body(request)
+    return await run_in_threadpool(save_settings_value,key,v,request)
+
+
+def save_settings_value(key,v,request):
+    validate_config(key,v)
     with db.transaction() as q:
         if key in ('site','security','mail'): q.execute('SELECT pg_advisory_xact_lock(1886031)')
-        if key=='proxy': q.execute('SELECT pg_advisory_xact_lock(1886003)')
+        if key=='proxy':
+            q.execute('SELECT pg_advisory_xact_lock(1886005)')
+            q.execute('SELECT pg_advisory_xact_lock(1886004)')
+            q.execute('SELECT pg_advisory_xact_lock(1886003)')
+        if key=='regions': q.execute('SELECT pg_advisory_xact_lock(1886003)')
         if key=='tiers': q.execute('SELECT pg_advisory_xact_lock(782518860)')
         previous=q.scalar('SELECT value FROM settings WHERE key=$1 FOR UPDATE',key)
+        if key=='regions':
+            from .regions import check_enable
+            for row in v['items']:check_enable(row,q)
         if key == 'mail':
             secret = encrypt(v['password']) if v.get('password') else ('' if v.get('clear_password') else previous.get('password_enc',''))
             v = {k:x for k,x in v.items() if k in DEFAULTS['mail']}
@@ -162,6 +178,8 @@ async def save_settings(key:str,request:Request):
             v['checkout_type']='hosted'
             v['checkout_types']={plan:'hosted' for plan in DEFAULTS['payment']['checkout_types']}
         if key=='proxy':
+            from .country_pool import change_mode
+            change_mode(q,v.get('mode','manual'))
             for name in ('default_id','global_id'):
                 require(not v.get(name) or q.scalar('SELECT enabled FROM resources WHERE id=$1',v[name]),'代理不存在或未启用')
         if key=='tiers':

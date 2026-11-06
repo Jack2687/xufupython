@@ -54,9 +54,10 @@ from test_product_plans import ProductPlanTests
 from test_proxy_editing import ProxyEditingTests
 from test_regions import RegionTests
 from test_team_subscription import TeamSubscriptionTests
+from test_country_pool import CountryPoolTests
 
 
-class BackendTests(TeamSubscriptionTests,RegionTests,ProxyEditingTests,ProductPlanTests,RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(CountryPoolTests,TeamSubscriptionTests,RegionTests,ProxyEditingTests,ProductPlanTests,RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -231,7 +232,7 @@ class BackendTests(TeamSubscriptionTests,RegionTests,ProxyEditingTests,ProductPl
 
     def test_09_proxy_secrets_leases_and_offline_checks(self):
         id,v=self.proxy();raw=db.scalar('SELECT endpoint_enc FROM resources WHERE id=$1',id)
-        data=self.ok(self.client.get('/api/admin/resources'));self.assertNotIn('endpoint_enc',json.dumps(data));self.assertNotIn('fixture:secret',json.dumps(data))
+        data=self.ok(self.client.get('/api/admin/resources'));self.assertNotIn('endpoint_enc',json.dumps(data));self.assertEqual(next(r for r in data['items'] if r['id']==id)['endpoint'],proxies.normalize_proxy(v['endpoint']))
         v['endpoint']='';v['name']='更新代理';self.ok(self.client.put('/api/admin/resources/'+id,json=v));self.assertEqual(raw,db.scalar('SELECT endpoint_enc FROM resources WHERE id=$1',id))
         lease=uid();db.execute("INSERT INTO proxy_leases(id,resource_id,expires_at) VALUES($1,$2,now()+interval '1 minute')",lease,id)
         v['country']='PH';self.ok(self.client.put('/api/admin/resources/'+id,json=v))
@@ -694,8 +695,9 @@ class BackendTests(TeamSubscriptionTests,RegionTests,ProxyEditingTests,ProductPl
                 main.worker_loop(stop)
                 self.assertEqual(observed,['off','all','off'])
                 renewal.assert_called_once();claim.assert_called_once()
-                self.assertEqual(pool.return_value.submit.call_count,5)
-                self.assertEqual(pool.return_value.submit.call_args_list[0].args[0],main.proxies.run_check)
+                self.assertEqual(pool.return_value.submit.call_count,6)
+                self.assertEqual(pool.return_value.submit.call_args_list[0].args[0],main.country_pool.auto_sync)
+                self.assertEqual(pool.return_value.submit.call_args_list[1].args[0],main.proxies.run_check)
                 pool.return_value.shutdown.assert_called_once_with(wait=True,cancel_futures=True)
             with patch.object(runtime.db,'scalar',side_effect=RuntimeError('database unavailable')):
                 self.assertEqual(runtime.worker_mode(),'off')
