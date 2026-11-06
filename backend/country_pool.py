@@ -267,8 +267,24 @@ def acquire_renewal(q,task_id):
 
 
 def blockers(q):
-    order_rows=q.all("SELECT id FROM orders WHERE status='processing' OR (status='succeeded' AND workflow='subscription' AND (activation IN ('pending','review') OR renewal IN ('pending','review','retrying'))) OR (status IN ('queued','review') AND EXISTS(SELECT 1 FROM order_proxy_sessions s WHERE s.order_id=orders.id)) LIMIT 20")
-    renewal_rows=q.all("SELECT id FROM renewal_tasks WHERE lease_until>now() OR status IN ('processing','checking') OR (status IN ('queued','review') AND EXISTS(SELECT 1 FROM renewal_proxy_sessions s WHERE s.task_id=renewal_tasks.id)) LIMIT 20")
+    # Review is a stopped outcome, not evidence that a worker still uses a proxy.
+    # Protect the brief paid -> follow-up handoff, plus actual follow-up locks
+    # (including explicit recovery), without trapping old or deleted records.
+    order_rows=q.all("""SELECT o.id FROM orders o WHERE
+        (o.deleted_at IS NULL AND (
+            o.status='processing'
+            OR (o.status='queued' AND EXISTS(SELECT 1 FROM order_proxy_sessions s WHERE s.order_id=o.id))
+            OR (o.status='succeeded' AND o.workflow='subscription'
+                AND (o.activation='pending' OR o.renewal IN ('pending','retrying'))
+                AND EXISTS(SELECT 1 FROM order_proxy_sessions s WHERE s.order_id=o.id AND s.expires_at>now())
+                AND NOT EXISTS(SELECT 1 FROM subscription_followups f WHERE f.order_id=o.id
+                    AND (f.warning_code<>'' OR f.phase='completed')))))
+        OR EXISTS(SELECT 1 FROM pg_locks l WHERE l.locktype='advisory' AND l.granted
+            AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+            AND l.classid IN (1886011,1886012) AND l.objsubid=2
+            AND l.objid::bigint=(hashtext(o.id)::bigint & 4294967295))
+        ORDER BY o.updated_at DESC LIMIT 20""")
+    renewal_rows=q.all("SELECT id FROM renewal_tasks WHERE lease_until>now() OR status IN ('processing','checking') OR (status='queued' AND EXISTS(SELECT 1 FROM renewal_proxy_sessions s WHERE s.task_id=renewal_tasks.id)) LIMIT 20")
     checks=q.scalar("SELECT count(*) FROM proxy_checks WHERE state IN ('queued','running')")
     leases=q.scalar('SELECT count(*) FROM proxy_leases WHERE expires_at>now()')
     return dict(orders=[r['id'] for r in order_rows],renewals=[r['id'] for r in renewal_rows],checks=checks,leases=leases)

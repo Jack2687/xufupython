@@ -150,6 +150,46 @@ class CountryPoolTests:
             self.assertEqual(admin['proxy']['source_mode'],'country_pool');self.assertNotIn('proxy',customer)
             self.assertNotIn(session,json_string(admin));self.assertNotIn('password-fixture',json_string(admin))
 
+    def test_pool_switch_ignores_deleted_and_stopped_review_orders(self):
+        with self.pool_fixture(),self.api_fixture() as (_,client,_):
+            self.pool_mode()
+            orders=[self.pool_order(client) for _ in range(4)]
+            with patch.object(pool,'api',side_effect=lambda *a:self.pool_generated()):
+                for order in orders:flow._acquire_order_proxy(order,'PH',600)
+            db.execute("UPDATE orders SET status='succeeded',activation='review',renewal='review' WHERE id=$1",orders[0])
+            db.execute("UPDATE orders SET status='review' WHERE id=$1",orders[1])
+            db.execute("UPDATE orders SET deleted_at=now() WHERE id=$1",orders[2])
+            db.execute("UPDATE orders SET status='succeeded',activation='pending',renewal='review' WHERE id=$1",orders[3])
+            db.execute("INSERT INTO subscription_followups(order_id,checkpoint_enc,phase,warning_code) VALUES($1,'fixture','activation','activation_pending')",orders[3])
+            bindings=db.all('SELECT * FROM order_proxy_sessions WHERE order_id=ANY($1) ORDER BY order_id',orders)
+            self.ok(self.client.put('/api/admin/proxy-mode',json={'mode':'manual'}))
+            self.assertEqual(pool.mode(),'manual')
+            self.assertEqual(bindings,db.all('SELECT * FROM order_proxy_sessions WHERE order_id=ANY($1) ORDER BY order_id',orders))
+
+    def test_pool_switch_blocks_processing_paid_handoff_and_active_recovery(self):
+        with self.pool_fixture(),self.api_fixture() as (_,client,_):
+            self.pool_mode();order=self.pool_order(client)
+            with patch.object(pool,'api',return_value=self.pool_generated()):flow._acquire_order_proxy(order,'PH',600)
+            for status in ('processing','succeeded'):
+                db.execute("UPDATE orders SET status=$2,activation='pending',renewal='pending' WHERE id=$1",order,status)
+                self.assertEqual(self.client.put('/api/admin/proxy-mode',json={'mode':'manual'}).status_code,409)
+            db.execute("UPDATE orders SET activation='active',renewal='review' WHERE id=$1",order)
+            for key in (1886011,1886012):
+                with db.transaction() as lock:
+                    lock.execute('SELECT pg_advisory_xact_lock($1,hashtext($2))',key,order)
+                    self.assertEqual(self.client.put('/api/admin/proxy-mode',json={'mode':'manual'}).status_code,409)
+            self.ok(self.client.put('/api/admin/proxy-mode',json={'mode':'manual'}))
+
+    def test_pool_switch_ignores_stopped_renewal_review_but_keeps_queue_guard(self):
+        with self.pool_fixture(),self.api_fixture() as (_,client,_):
+            self.pool_mode()
+            task=self.ok(client.post('/api/v1/renewals',json={'session':self.fake_session(refresh=True),'accepted':True},headers={'Idempotency-Key':uid()}))['id']
+            with patch.object(pool,'api',return_value=self.pool_generated()):
+                with db.transaction() as q:pool.acquire_renewal(q,task)
+            self.assertEqual(self.client.put('/api/admin/proxy-mode',json={'mode':'manual'}).status_code,409)
+            db.execute("UPDATE renewal_tasks SET status='review',lease_token=NULL,lease_until=NULL WHERE id=$1",task)
+            self.ok(self.client.put('/api/admin/proxy-mode',json={'mode':'manual'}))
+
     def test_manual_iproyal_rewrites_country_and_admin_sees_address(self):
         from backend import subscription,subscription_cslive_full
         from urllib.parse import urlsplit,unquote
