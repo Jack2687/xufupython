@@ -5,6 +5,20 @@ from backend.common import uid
 
 
 class InvitationTests:
+    def test_reward_switch_removes_navigation_and_blocks_direct_api(self):
+        original=db.scalar("SELECT value FROM settings WHERE key='invites'")
+        _,_,member=self.new_user()
+        try:
+            for enabled in (False,True):
+                self.ok(self.client.put('/api/admin/settings/invites',json={**original,'enabled':enabled}))
+                self.assertEqual(self.ok(member.get('/api/public'))['features']['invites'],enabled)
+                for client in (member,self.client):
+                    view=self.ok(client.get('/api/me'))
+                    self.assertEqual(any(x['id']=='invites' for x in view['navigation']),enabled)
+                    self.assertEqual(client.get('/api/invites').status_code,200 if enabled else 403)
+                self.ok(self.client.get('/api/admin/invites'))
+        finally:db.execute("UPDATE settings SET value=$1 WHERE key='invites'",original)
+
     def invite_order(self, invitee, active=True, fee=10000, workflow='subscription'):
         oid=uid()
         db.execute("INSERT INTO orders(id,user_id,product_id,product_name,email,fee,status,activation,workflow,idempotency_key,request_hash) VALUES($1,$2,'pro','Pro','fixture@example.test',$3,'succeeded',$4,$5,$1,'fixture')",oid,invitee,fee,'active' if active else 'pending',workflow)

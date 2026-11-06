@@ -3,10 +3,11 @@ import {ref,onMounted} from 'vue'
 import {Search,RefreshCw} from 'lucide-vue-next'
 import {api,cash,date,notify,type Row} from '../lib'
 import DataTable from './DataTable.vue'
+const emit=defineEmits<{changed:[]}>()
 const data=ref<Row>({items:[],stats:{}}),rules=ref<Row>({enabled:true,stages:[]}),page=ref(1),search=ref(''),busy=ref(false),saving=ref(false),error=ref('')
 const states:Row={waiting:'待满足条件',rewarded:'已结算',adjusted:'部分退回',reversed:'已撤回',recovering:'待扣回'}
 async function load(initial=false){busy.value=true;error.value='';try{data.value=await api(`/admin/invites?page=${page.value}&q=${encodeURIComponent(search.value)}`);if(initial)rules.value=JSON.parse(JSON.stringify(data.value.rules))}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
-async function save(){saving.value=true;try{await api('/admin/settings/invites','PUT',rules.value);notify('奖励规则已保存，仅影响新建订单');await load(true)}catch(e){notify((e as Error).message)}finally{saving.value=false}}
+async function save(){saving.value=true;try{await api('/admin/settings/invites','PUT',rules.value);notify('奖励规则已保存，仅影响新建订单');await load(true);emit('changed')}catch(e){notify((e as Error).message)}finally{saving.value=false}}
 onMounted(()=>load(true))
 </script>
 <template>

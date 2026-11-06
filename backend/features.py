@@ -15,7 +15,9 @@ def navigation(user=None):
 
 def capabilities(user=None):
     values = config('features')
-    return {name: True if user and user.get('role') == 'admin' else values.get(name, True) is True for name in FEATURES}
+    flags = {name: True if user and user.get('role') == 'admin' else values.get(name, True) is True for name in FEATURES}
+    flags['invites'] = flags['invites'] and config('invites').get('enabled') is True
+    return flags
 
 
 def allowed(name, user=None):
@@ -28,6 +30,8 @@ def require_any(user, *names):
 
 
 def enforce(request, user):
+    if request.url.path.rstrip('/') == '/api/invites':
+        require_any(user, 'invites')
     if user['role'] == 'admin':
         return
     path = request.url.path.rstrip('/')
