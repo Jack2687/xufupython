@@ -30,10 +30,12 @@
     "frontend/src/components/PaymentPanel.vue",
     "frontend/src/components/PaymentTrace.vue",
     "frontend/src/components/PaymentTraceEvents.vue",
+    "frontend/src/components/PriceReferenceModal.vue",
     "frontend/src/components/ProfilePage.vue",
     "frontend/src/components/ProgressTrack.vue",
     "frontend/src/components/ProxyTable.vue",
     "frontend/src/components/RechargeTable.vue",
+    "frontend/src/components/RegionPriceSchedule.vue",
     "frontend/src/components/RiskMonitor.vue",
     "frontend/src/components/SiteControls.vue",
     "frontend/src/components/SiteIconUpload.vue",
@@ -44,6 +46,7 @@
     "frontend/src/orderUpdates.ts",
     "frontend/src/paymentJourney.ts",
     "frontend/src/paymentTraceRows.ts",
+    "frontend/src/priceReference.ts",
     "frontend/src/record-format.ts",
     "frontend/src/records.css",
     "frontend/src/style.css",
@@ -51,6 +54,7 @@
     "frontend/tests/currency.test.mjs",
     "frontend/tests/paymentJourney.test.mjs",
     "frontend/tests/paymentTraceRows.test.mjs",
+    "frontend/tests/priceReference.test.mjs",
     "frontend/tsconfig.json"
   ],
   "checkout_display": "2026-11-03：用户要求排查订阅办理监控中提链地址缺失。仅增加管理员已保存链接的只读投影和展示，不改变付款核心。当前快照不冒充完整分轮历史。",
@@ -69,5 +73,6 @@
   "experience_points_recharges": "2026-11-04：用户授权付款后两个独立开关、实时阶段通知与转圈、技术记录合并、风控监控优化、客户权限检查、统一积分单位、准确资金明细、公告中心及包含兑换码的充值记录，并推送发布。",
   "recharge_column_width": "2026-11-04：用户截图指出充值记录的说明和日期被挤成竖排。为十列充值表设置独立列宽及横向滚动，时间不拆行，手机仍按卡片展示；同时检查资金流水。",
   "invites_copy_scroll_stage": "2026-11-04：用户授权邀请管理与伙伴计划一体化，规则自主设计；兑换码单个/批量逐行复制；隐藏竖滚动条并保留滚动；办理阶段改显示结束日期时间。",
-  "country_proxy_pool": "2026-11-06：国家代理池、订阅地区与币种、国家搜索，以及管理员完整代理地址回显。"
+  "country_proxy_pool": "2026-11-06：国家代理池、订阅地区与币种、国家搜索，以及管理员完整代理地址回显。用户追加要求批量启停：无需逐项勾选，支持全部地区、当前筛选和已选范围，并显示实际影响数量。",
+  "regional_price_reference": "2026-11-06：用户授权各国套餐参考价弹窗、按当前套餐和席位的 R 参考价排序国家下拉框、地区价格定时配置，报价默认每小时、汇率每天更新，地区范围跟随订阅地区；上游仅服务器访问，前端只读本站缓存。合并主线程地区批量启停并提交推送发布。 用户追加要求价格弹窗换色，改用主站墨绿/浅绿。"
 }

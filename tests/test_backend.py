@@ -55,9 +55,10 @@ from test_proxy_editing import ProxyEditingTests
 from test_regions import RegionTests
 from test_team_subscription import TeamSubscriptionTests
 from test_country_pool import CountryPoolTests
+from test_region_prices import RegionalPriceTests
 
 
-class BackendTests(CountryPoolTests,TeamSubscriptionTests,RegionTests,ProxyEditingTests,ProductPlanTests,RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
+class BackendTests(RegionalPriceTests,CountryPoolTests,TeamSubscriptionTests,RegionTests,ProxyEditingTests,ProductPlanTests,RedeemUsageTests,AuthSecurityTests,RedeemCodeTests,CheckoutDiagnosticTests,BrandingTests,CustomMenuTests,AccountDeletionTests,SiteSecurityTests,InvitationTests,ExperienceTests,PaymentDelaySettingsTests,AdminOrderPricingTests,CustomerApiTests,unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with patch('backend.main.worker_loop'):
@@ -695,9 +696,14 @@ class BackendTests(CountryPoolTests,TeamSubscriptionTests,RegionTests,ProxyEditi
                 main.worker_loop(stop)
                 self.assertEqual(observed,['off','all','off'])
                 renewal.assert_called_once();claim.assert_called_once()
-                self.assertEqual(pool.return_value.submit.call_count,6)
-                self.assertEqual(pool.return_value.submit.call_args_list[0].args[0],main.country_pool.auto_sync)
-                self.assertEqual(pool.return_value.submit.call_args_list[1].args[0],main.proxies.run_check)
+                calls=pool.return_value.submit.call_args_list
+                price_calls=[c for c in calls if c.args[0] is main.price_reference.refresh_tick]
+                self.assertEqual(len(price_calls),1)
+                self.assertIs(price_calls[0].args[1],stop)
+                other_calls=[c for c in calls if c.args[0] is not main.price_reference.refresh_tick]
+                self.assertEqual(len(other_calls),6)
+                self.assertEqual(other_calls[0].args[0],main.country_pool.auto_sync)
+                self.assertEqual(other_calls[1].args[0],main.proxies.run_check)
                 pool.return_value.shutdown.assert_called_once_with(wait=True,cancel_futures=True)
             with patch.object(runtime.db,'scalar',side_effect=RuntimeError('database unavailable')):
                 self.assertEqual(runtime.worker_mode(),'off')
