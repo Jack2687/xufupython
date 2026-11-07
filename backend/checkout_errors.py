@@ -35,6 +35,7 @@ def safe_code(value):
 
 
 def classify(code):
+    if code == 'device_id_missing': return code
     if re.fullmatch(r'http_[1-5]\d\d', code):
         status = int(code[5:])
         if status == 401: return 'invalid_session'
@@ -55,10 +56,28 @@ def classify(code):
     return 'checkout_failed'
 
 
+def homepage_diagnostics(values):
+    """Accept only bounded facts; never page text, headers, URLs or cookie values."""
+    if not isinstance(values, dict): return {}
+    result = {}
+    for key, value in values.items():
+        if key == 'homepage_status' and type(value) is int and 100 <= value <= 599:
+            result[key] = value
+        elif key == 'homepage_response_bytes' and type(value) is int and 0 <= value <= 2147483647:
+            result[key] = value
+        elif key in {'homepage_redirected', 'homepage_device_cookie_before', 'homepage_device_cookie_received',
+                     'homepage_device_id_present', 'homepage_challenge_detected'} and type(value) is bool:
+            result[key] = value
+        elif key == 'homepage_page_kind' and value in ('html', 'json', 'empty', 'other'):
+            result[key] = value
+    return result
+
+
 class CheckoutError(Exception):
-    def __init__(self, code, message='', *, exit_code=None):
+    def __init__(self, code, message='', *, exit_code=None, diagnostics=None):
         self.code = safe_code(code)
         self.category = classify(self.code)
         self.exit_code = exit_code if type(exit_code) is int and -65535 <= exit_code <= 65535 else None
+        self.diagnostics = homepage_diagnostics(diagnostics)
         # Messages are deliberately excluded: a future upstream error may echo a token.
         super().__init__(self.code)

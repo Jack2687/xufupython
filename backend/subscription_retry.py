@@ -4,6 +4,7 @@ import re
 
 from . import db, payment_trace as trace
 from .common import config, decrypt, encrypt
+from .checkout_errors import CheckoutError
 
 NETWORK_ERRORS = {'timeout', 'proxy_connect', 'dns', 'connection', 'network_error'}
 
@@ -77,7 +78,9 @@ def handle_failure(order_id, exc):
             return True
         cfg = config('payment', q)
         limit = cfg.get('network_restart_limit', 2)
-        if code not in NETWORK_ERRORS or row['network_retry_count'] >= limit:
+        initialization_retry = (isinstance(exc, CheckoutError) and exc.code == 'device_id_missing'
+                                and not row['checkout_checkpoint_enc'])
+        if (code not in NETWORK_ERRORS and not initialization_retry) or row['network_retry_count'] >= limit:
             return False
         # The interval is the existing admin scheduler setting, not a blocking sleep.
         delay = config('scheduler', q)['retry_delay_seconds']
@@ -88,9 +91,12 @@ def handle_failure(order_id, exc):
         q.execute("UPDATE orders SET status='queued',updated_at=now() WHERE id=$1", order_id)
         resume = '复用已生成的结账链接，从付款阶段重试' if row['checkout_checkpoint_enc'] else '重新生成结账链接'
         message = f'网络请求失败，{delay} 秒后{resume}（第 {count}/{limit} 次重试）。'
-        q.execute("INSERT INTO order_events(order_id,stage,message) VALUES($1,'network_retry',$2)", order_id, message)
-        trace.record('queue', 'waiting', 'network_retry_scheduled', order_id=order_id,
-                     diagnostics={'network_reason': code if code in NETWORK_ERRORS - {'network_error'} else 'connection',
+        if initialization_retry:
+            message = f'未获取到设备标识，{delay} 秒后使用本单原代理会话重试初始化（第 {count}/{limit} 次重试）。'
+        q.execute("INSERT INTO order_events(order_id,stage,message) VALUES($1,$2,$3)", order_id,
+                  'checkout_retry' if initialization_retry else 'network_retry', message)
+        trace.record('queue', 'waiting', 'checkout_retry_scheduled' if initialization_retry else 'network_retry_scheduled', order_id=order_id,
+                     diagnostics={'network_reason': '' if initialization_retry else code if code in NETWORK_ERRORS - {'network_error'} else 'connection',
                                   'retry_number': count, 'retry_limit': limit, 'retry_delay_seconds': delay,
                                   'checkout_reused': bool(row['checkout_checkpoint_enc'])}, q=q)
         return True

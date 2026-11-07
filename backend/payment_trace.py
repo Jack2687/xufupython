@@ -9,7 +9,7 @@ import time
 from urllib.parse import urlsplit
 
 from . import db, http_evidence
-from .checkout_errors import CheckoutError
+from .checkout_errors import CheckoutError, homepage_diagnostics
 
 log = logging.getLogger('xufu.payment_trace')
 _current = ContextVar('payment_trace', default=None)
@@ -67,6 +67,8 @@ CODES = {
     'invalid_json_response': '上游未返回有效 JSON，请结合 HTTP 状态查看响应摘要',
     'network_timeout': '付款后网络请求超时',
     'checkout_failed': '提链失败，请查看原始错误码',
+    'device_id_missing': '初始化失败：未获取到设备标识',
+    'checkout_retry_scheduled': '未获取到设备标识，已按配置安排初始化重试',
     'checkout_existing_subscription': '账号已有订阅，无法继续提链',
     'checkout_account_unavailable': '账号不存在或不符合套餐要求',
     'checkout_verification_failed': '提链验证未通过，请查看原始错误码',
@@ -137,7 +139,7 @@ def error_code(exc):
 
 
 def _diagnostics(values):
-    result = {}
+    result = homepage_diagnostics(values)
     for key, value in (values or {}).items():
         if key in _DIAGNOSTIC_ENUMS and isinstance(value, str) and value in _DIAGNOSTIC_ENUMS[key]:
             result[key] = value
@@ -288,13 +290,14 @@ def request(kind):
         yield observation
     except Exception as exc:
         if isinstance(exc, CheckoutError):
+            observation.diagnostics.update(exc.diagnostics)
             observation.diagnostics.update(response_error_code=exc.code, response_error_type='go_checkout')
             if exc.exit_code is not None:
                 observation.diagnostics['checkout_exit_code'] = exc.exit_code
             if re.fullmatch(r'http_[1-5]\d\d', exc.code):
                 observation.status = int(exc.code[5:])
-            log.warning('[%s] checkout failure: code=%s category=%s exit=%s',
-                        ctx['order_id'], exc.code, exc.category, exc.exit_code)
+            log.warning('[%s] checkout failure: code=%s category=%s exit=%s diagnostics=%s',
+                        ctx['order_id'], exc.code, exc.category, exc.exit_code, exc.diagnostics)
         observation.code = observation.code or error_code(exc)
         raise
     finally:

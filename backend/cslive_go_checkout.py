@@ -178,7 +178,7 @@ def create_checkout(
         hosted_url = str(parsed.get('checkout_url') or parsed.get('hostedUrl') or '').strip()
         cs_id = str(parsed.get('checkout_id') or parsed.get('checkoutSessionId') or '').strip()
         if exit_code != 0 or err or not hosted_url or not cs_id:
-            raise CheckoutError(err or 'checkout_failed', exit_code=exit_code)
+            raise CheckoutError(err or 'checkout_failed', exit_code=exit_code, diagnostics=parsed.get('diagnostics'))
         diagnostic.response(200)
         return {
             'ok': True,

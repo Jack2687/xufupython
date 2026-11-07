@@ -430,6 +430,66 @@ func (p *chatgpt_Platform) Refresh() error {
 	return nil
 }
 
+// Only typed facts may leave this boundary. Never retain response bodies,
+// Location URLs, Cookie/Set-Cookie values or tokens in diagnostic output.
+type checkoutHomepageEvidence struct {
+	Status               int    `json:"homepage_status"`
+	Redirected           bool   `json:"homepage_redirected"`
+	DeviceCookieBefore   bool   `json:"homepage_device_cookie_before"`
+	DeviceCookieReceived bool   `json:"homepage_device_cookie_received"`
+	DeviceIDPresent      bool   `json:"homepage_device_id_present"`
+	ChallengeDetected    bool   `json:"homepage_challenge_detected"`
+	PageKind             string `json:"homepage_page_kind"`
+	ResponseBytes        int    `json:"homepage_response_bytes"`
+}
+
+type checkoutHomepageError struct {
+	Code        string
+	Diagnostics checkoutHomepageEvidence
+}
+
+func (e *checkoutHomepageError) Error() string { return e.Code }
+func (e *checkoutHomepageError) Unwrap() error { return protocol_NewError(e.Code) }
+
+func checkoutHomepageErrorDiagnostics(err error) *checkoutHomepageEvidence {
+	var failure *checkoutHomepageError
+	if errors.As(err, &failure) {
+		return &failure.Diagnostics
+	}
+	return nil
+}
+
+func checkoutHomepageDiagnostics(response *protocol_HTTPResponse, cookies string) checkoutHomepageEvidence {
+	e := checkoutHomepageEvidence{Status: response.StatusCode,
+		Redirected:    response.StatusCode >= 300 && response.StatusCode < 400,
+		ResponseBytes: len(response.Content), PageKind: "other"}
+	request := &http.Request{Header: http.Header{"Cookie": []string{cookies}}}
+	for _, cookie := range request.Cookies() {
+		if cookie.Name == "oai-did" && cookie.Value != "" {
+			e.DeviceCookieBefore = true
+		}
+	}
+	for _, cookie := range (&http.Response{Header: response.Headers}).Cookies() {
+		if cookie.Name == "oai-did" && cookie.Value != "" {
+			e.DeviceCookieReceived = true
+		}
+	}
+	contentType := strings.ToLower(response.Headers.Get("Content-Type"))
+	preview := strings.ToLower(strings.TrimSpace(string(response.Content[:min(len(response.Content), 65536)])))
+	switch {
+	case len(response.Content) == 0:
+		e.PageKind = "empty"
+	case strings.Contains(contentType, "text/html") || strings.HasPrefix(preview, "<!doctype html") || strings.HasPrefix(preview, "<html"):
+		e.PageKind = "html"
+	case strings.Contains(contentType, "json"):
+		e.PageKind = "json"
+	}
+	e.ChallengeDetected = strings.EqualFold(response.Headers.Get("Cf-Mitigated"), "challenge") ||
+		strings.Contains(preview, "/cdn-cgi/challenge-platform/") || strings.Contains(preview, "cf-chl-") ||
+		strings.Contains(preview, "<title>just a moment")
+	return e
+}
+
 func (p *chatgpt_Platform) Homepage() error {
 	h := p.Headers("")
 	h.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -437,9 +497,11 @@ func (p *chatgpt_Platform) Homepage() error {
 	if err != nil {
 		return err
 	}
+	diagnostics := checkoutHomepageDiagnostics(response, p.CP.Cookies)
 	p.Absorb(response)
+	diagnostics.DeviceIDPresent = p.CP.DeviceID != ""
 	if response.StatusCode != 200 {
-		return &protocol_ProtocolError{Code: "homepage_unavailable"}
+		return &checkoutHomepageError{Code: "homepage_unavailable", Diagnostics: diagnostics}
 	}
 	html := string(response.Content)
 	for _, pair := range [][2]string{{"client_version", `data-build="([^"]+)"`}, {"build", `data-seq="([^"]+)"`}, {"attestation", `"webDeploymentAttestation":"([^"]+)"`}, {"session_id", `"sessionId":"([^"]+)"`}} {
@@ -466,7 +528,7 @@ func (p *chatgpt_Platform) Homepage() error {
 	}
 	p.CP.Metadata["scripts"] = scripts
 	if p.CP.DeviceID == "" {
-		return &protocol_ProtocolError{Code: "device_id_missing"}
+		return &checkoutHomepageError{Code: "device_id_missing", Diagnostics: diagnostics}
 	}
 	return nil
 }
@@ -1096,7 +1158,7 @@ func (s *checkpointstore_Store) Close() error {
 
 type cli_arguments struct {
 	Country, Plan, Session, Currency, Timezone, Proxy, CheckoutType string
-	PromoCodeEnv                                                   string
+	PromoCodeEnv                                                    string
 	BrowserProfile                                                  string
 	TLSCert, TLSKey                                                 string
 	WithPrice, Debug                                                bool
@@ -1337,6 +1399,9 @@ func (r *cli_Runner) CreateCheckout(ctx context.Context, argv []string) (code in
 	result, err := r.ClientFactory(a.config(), gptpay_ClientOptions{EventSink: r.observer(a.Debug)}).CreateCheckout(ctx, session, gptpay_CreateCheckoutOptions{Country: a.Country, Plan: a.Plan, Seats: a.Seats, Seats5x: a.Seats5x, Interval: a.Interval, CheckoutType: a.CheckoutType, WithPrice: a.WithPrice, FingerprintClockOffsetHours: a.Offset, PromoCode: os.Getenv(a.PromoCodeEnv)})
 	if err != nil {
 		output["error_code"] = observability_SafeErrorCode(err)
+		if diagnostics := checkoutHomepageErrorDiagnostics(err); diagnostics != nil {
+			output["diagnostics"] = diagnostics
+		}
 		return 1
 	}
 	output = protocol_Map{"checkout_id": result.CheckoutID, "checkout_url": result.CheckoutURL, "processor_entity": result.ProcessorEntity, "error_code": result.ErrorCode, "price": result.Price}

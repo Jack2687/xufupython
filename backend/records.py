@@ -22,7 +22,7 @@ ANN="SELECT id,title,body,tone FROM announcements WHERE published AND (starts_at
 def _order_history(id, technical=False):
     events=db.all('SELECT id,stage,message,created_at FROM order_events WHERE order_id=$1 ORDER BY id',id)
     labels={'admin_closed':'管理员关闭订单','network_retry':'等待网络重试','checkout_reused':'复用原结账链接','payment_review':'付款结果待核实','queued':'排队受理','processing':'开始办理','network_check':'检查代理出口',
-            'network_verified':'记录代理出口','checkout':'生成结账链接','checkout_done':'结账链接已生成',
+            'network_verified':'记录代理出口','checkout_retry':'等待初始化重试','checkout':'生成结账链接','checkout_done':'结账链接已生成',
             'awaiting_payment':'等待用户付款','payment':'开始付款','confirming':'提交付款确认',
             'approving':'商户批准','failed':'办理失败','payment_succeeded':'付款成功',
             'activation':'核实订阅生效','activation_confirmed':'订阅生效','activation_pending':'等待订阅生效',
